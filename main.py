@@ -8,16 +8,15 @@ from bs4 import BeautifulSoup
 from openai import OpenAI
 
 
-
 def read_config(config_file):
-    with open(config_file, 'r') as f:
+    with open(config_file, "r") as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
 
     return config
 
 
 def split_html_by_sentence(html_str, max_chunk_size=10000):
-    sentences = html_str.split('. ')
+    sentences = html_str.split(". ")
 
     chunks = []
     current_chunk = ""
@@ -27,9 +26,9 @@ def split_html_by_sentence(html_str, max_chunk_size=10000):
             chunks.append(current_chunk)
             current_chunk = sentence
         else:
-            current_chunk += '. '
+            current_chunk += ". "
             current_chunk += sentence
-    
+
     if current_chunk:
         chunks.append(current_chunk)
 
@@ -38,7 +37,7 @@ def split_html_by_sentence(html_str, max_chunk_size=10000):
 
     # Add dot to the end of each chunk
     for i in range(len(chunks)):
-        chunks[i] += '.'
+        chunks[i] += "."
 
     return chunks
 
@@ -53,44 +52,54 @@ def system_prompt(from_lang: str, to_lang: str) -> str:
     )
 
 
-def translate_chunk(client, text, from_lang='EN', to_lang='PL'):
+def translate_chunk(client, text, from_lang="EN", to_lang="PL"):
     response = client.chat.completions.create(
-        model='gpt-4o',
+        model="gpt-4o",
         temperature=0.2,
         messages=[
-            { 'role': 'system', 'content': system_prompt(from_lang, to_lang) },
-            { 'role': 'user', 'content': text },
-        ]
+            {"role": "system", "content": system_prompt(from_lang, to_lang)},
+            {"role": "user", "content": text},
+        ],
     )
 
     translated_text = response.choices[0].message.content
     return translated_text
 
 
-def translate_text(client, text, from_lang='EN', to_lang='PL'):
+def translate_text(client, text, from_lang="EN", to_lang="PL"):
     translated_chunks = []
     chunks = split_html_by_sentence(text)
 
     for i, chunk in enumerate(chunks):
-        print("\tTranslating chunk %d/%d..." % (i+1, len(chunks)))
+        print("\tTranslating chunk %d/%d..." % (i + 1, len(chunks)))
         translated_chunks.append(translate_chunk(client, chunk, from_lang, to_lang))
 
-    return ' '.join(translated_chunks)
+    return " ".join(translated_chunks)
 
 
-def translate(client, input_epub_path, output_epub_path, from_chapter=0, to_chapter=9999, from_lang='EN', to_lang='PL'):
+def translate(
+    client,
+    input_epub_path,
+    output_epub_path,
+    from_chapter=0,
+    to_chapter=9999,
+    from_lang="EN",
+    to_lang="PL",
+):
     book = epub.read_epub(input_epub_path)
 
     current_chapter = 1
-    chapters_count = len([i for i in book.get_items() if i.get_type() == ebooklib.ITEM_DOCUMENT])
+    chapters_count = len(
+        [i for i in book.get_items() if i.get_type() == ebooklib.ITEM_DOCUMENT]
+    )
 
     for item in book.get_items():
         if item.get_type() == ebooklib.ITEM_DOCUMENT:
             if current_chapter >= from_chapter and current_chapter <= to_chapter:
                 print("Processing chapter %d/%d..." % (current_chapter, chapters_count))
-                soup = BeautifulSoup(item.content, 'html.parser')
+                soup = BeautifulSoup(item.content, "html.parser")
                 translated_text = translate_text(client, str(soup), from_lang, to_lang)
-                item.content = translated_text.encode('utf-8')
+                item.content = translated_text.encode("utf-8")
 
             current_chapter += 1
 
@@ -100,55 +109,103 @@ def translate(client, input_epub_path, output_epub_path, from_chapter=0, to_chap
 def show_chapters(input_epub_path):
     book = epub.read_epub(input_epub_path)
 
+    total_characters = 0
     current_chapter = 1
-    chapters_count = len([i for i in book.get_items() if i.get_type() == ebooklib.ITEM_DOCUMENT])
+    chapters_count = len(
+        [i for i in book.get_items() if i.get_type() == ebooklib.ITEM_DOCUMENT]
+    )
 
     for item in book.get_items():
         if item.get_type() == ebooklib.ITEM_DOCUMENT:
-            print("▶️  Chapter %d/%d (%d characters)" % (current_chapter, chapters_count, len(item.content)))
-            soup = BeautifulSoup(item.content, 'html.parser')
+            chapter_length = len(item.content)
+            total_characters += chapter_length
+            print(
+                f"▶️  Chapter {current_chapter}/{chapters_count} ({chapter_length} characters)"
+            )
+            soup = BeautifulSoup(item.content, "html.parser")
             chapter_beginning = soup.text[0:250]
-            chapter_beginning = re.sub(r'\n{2,}', '\n', chapter_beginning)
+            chapter_beginning = re.sub(r"\n{2,}", "\n", chapter_beginning)
             print(chapter_beginning + "\n\n")
 
             current_chapter += 1
 
+    print(f"Total characters in the book: {total_characters}")
+
+
+def initialize_llm_client(api_key, base_url):
+    """
+    Initialize the OpenAI client with GEMINI base URL.
+    """
+    print("api key", api_key)
+    print("base_url", base_url)
+    return (
+        OpenAI(api_key=api_key)
+        if base_url is None
+        else OpenAI(api_key=api_key, base_url=base_url)
+    )
 
 
 if __name__ == "__main__":
     # Create the top-level parser
-    parser = argparse.ArgumentParser(description='App to translate or show chapters of a book.')
-    subparsers = parser.add_subparsers(dest='mode', help='Mode of operation.')
+    parser = argparse.ArgumentParser(
+        description="App to translate or show chapters of a book."
+    )
+    subparsers = parser.add_subparsers(dest="mode", help="Mode of operation.")
 
     # Create the parser for the "translate" mode
-    parser_translate = subparsers.add_parser('translate', help='Translate a book.')
-    parser_translate.add_argument('--input', required=True, help='Input file path.')
-    parser_translate.add_argument('--output', required=True, help='Output file path.')
-    parser_translate.add_argument('--config', required=True, help='Configuration file path.')
-    parser_translate.add_argument('--from-chapter', type=int, help='Starting chapter for translation.')
-    parser_translate.add_argument('--to-chapter', type=int, help='Ending chapter for translation.')
-    parser_translate.add_argument('--from-lang', help='Source language.', default='EN')
-    parser_translate.add_argument('--to-lang', help='Target language.', default='PL')
+    parser_translate = subparsers.add_parser("translate", help="Translate a book.")
+    parser_translate.add_argument("--input", required=True, help="Input file path.")
+    parser_translate.add_argument("--output", required=True, help="Output file path.")
+    parser_translate.add_argument(
+        "--config", required=True, help="Configuration file path."
+    )
+    parser_translate.add_argument(
+        "--from-chapter", type=int, help="Starting chapter for translation."
+    )
+    parser_translate.add_argument(
+        "--to-chapter", type=int, help="Ending chapter for translation."
+    )
+    parser_translate.add_argument("--from-lang", help="Source language.", default="EN")
+    parser_translate.add_argument("--to-lang", help="Target language.", default="PL")
+    parser_translate.add_argument(
+        "--progress-file", help="File to save translation progress."
+    )
+    parser_translate.add_argument(
+        "--llm-provider",
+        choices=["openai", "gemini"],
+        required=True,
+        help="LLM provider to use for translation.",
+    )
 
     # Create the parser for the "show-chapters" mode
-    parser_show = subparsers.add_parser('show-chapters', help='Show the list of chapters.')
-    parser_show.add_argument('--input', required=True, help='Input file path.')
+    parser_show = subparsers.add_parser(
+        "show-chapters", help="Show the list of chapters."
+    )
+    parser_show.add_argument("--input", required=True, help="Input file path.")
 
     # Parse the arguments
     args = parser.parse_args()
 
     # Call the appropriate function based on the mode
-    if args.mode == 'translate':
+    if args.mode == "translate":
         config = read_config(args.config)
         from_chapter = int(args.from_chapter)
         to_chapter = int(args.to_chapter)
         from_lang = args.from_lang
         to_lang = args.to_lang
-        openai_client = OpenAI(api_key=config['openai']['api_key'])
+        openai_client = OpenAI(api_key=config["openai"]["api_key"])
 
-        translate(openai_client, args.input, args.output, from_chapter, to_chapter, from_lang, to_lang)
+        translate(
+            openai_client,
+            args.input,
+            args.output,
+            from_chapter,
+            to_chapter,
+            from_lang,
+            to_lang,
+        )
 
-    elif args.mode == 'show-chapters':
+    elif args.mode == "show-chapters":
         show_chapters(args.input)
 
     else:
