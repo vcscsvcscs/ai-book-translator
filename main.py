@@ -302,7 +302,7 @@ if __name__ == "__main__":
             base_url = config["gemini"].get(
                 "base_url", "https://generativelanguage.googleapis.com/v1beta/"
             )
-            model = "gemini-2.0-flash-exp"
+            model = "gemini-2.5-flash-preview-05-20"
 
         llm_client = initialize_llm_client(api_key=api_key, base_url=base_url)
 
