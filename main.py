@@ -4,17 +4,23 @@ import yaml
 import json
 import time
 from pathlib import Path
+from typing import Optional
 
 import ebooklib
 from ebooklib import epub
 from bs4 import BeautifulSoup
-from openai import OpenAI
+
+# LlamaIndex imports
+from llama_index.core.llms import LLM
+from llama_index.llms.openai import OpenAI
+from llama_index.llms.azure_openai import AzureOpenAI
+from llama_index.llms.gemini import Gemini
+from llama_index.llms.ollama import Ollama
 
 
 def read_config(config_file):
     with open(config_file, "r") as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
-
     return config
 
 
@@ -36,11 +42,13 @@ def split_html_by_sentence(html_str, max_chunk_size=20000):
         chunks.append(current_chunk)
 
     # Remove dot from the beginning of first chunk
-    chunks[0] = chunks[0][2:]
+    if chunks and chunks[0].startswith(". "):
+        chunks[0] = chunks[0][2:]
 
     # Add dot to the end of each chunk
     for i in range(len(chunks)):
-        chunks[i] += "."
+        if not chunks[i].endswith("."):
+            chunks[i] += "."
 
     return chunks
 
@@ -48,42 +56,40 @@ def split_html_by_sentence(html_str, max_chunk_size=20000):
 def system_prompt(from_lang: str, to_lang: str) -> str:
     return (
         f"You are an {from_lang}-to-{to_lang} specialized translator. "
-        f"Keep all special characters and HTML tags as in the source text. "
+        f"Keep all special characters and HTML tags exactly as in the source text. "
         f"Your translation should be in {to_lang} only. "
         f"Ensure the translation is comfortable to read by avoiding overly literal translations. "
-        f"Maintain readability and consistency with the source text."
+        f"Maintain readability and consistency with the source text. "
+        f"Do not add any explanations or comments, just provide the translation."
     )
 
 
 def translate_chunk(
-    client,
-    text,
-    from_lang="EN",
-    to_lang="BG",
-    max_retries=3,
-    retry_delay=180,
-    model=None,
-):
+    llm: LLM,
+    text: str,
+    from_lang: str = "EN",
+    to_lang: str = "BG",
+    max_retries: int = 3,
+    retry_delay: int = 180,
+) -> str | None:
+    prompt = f"{system_prompt(from_lang, to_lang)}\n\nText to translate:\n{text}"
+
     for attempt in range(max_retries):
         try:
-            response = client.chat.completions.create(
-                model=model,
-                temperature=0.2,
-                messages=[
-                    {"role": "system", "content": system_prompt(from_lang, to_lang)},
-                    {"role": "user", "content": text},
-                ],
-            )
-            return response.choices[0].message.content
+            response = llm.complete(prompt)
+            return response.text.strip()
         except Exception as e:
-            if "rate limit" in str(e).lower():
+            if "rate limit" in str(e).lower() or "quota" in str(e).lower():
                 if attempt < max_retries - 1:
                     print(
                         f"Rate limit hit. Waiting {retry_delay} seconds before retry {attempt + 1}/{max_retries}"
                     )
                     time.sleep(retry_delay)
                     continue
-            raise
+            print(f"Error in translation attempt {attempt + 1}: {str(e)}")
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(5)  # Short delay before retry
 
 
 def save_progress(progress_file, chapter, chunk_index, total_chunks):
@@ -107,14 +113,13 @@ def load_progress(progress_file):
 
 
 def translate_text(
-    client,
-    text,
-    from_lang="English",
-    to_lang="Hungarian",
-    progress_file=None,
-    chapter=None,
-    model=None,
-):
+    llm: LLM,
+    text: str,
+    from_lang: str = "English",
+    to_lang: str = "Hungarian",
+    progress_file: Optional[str] = None,
+    chapter: Optional[int] = None,
+) -> str:
     translated_chunks = []
     chunks = split_html_by_sentence(text)
 
@@ -131,9 +136,7 @@ def translate_text(
     for i, chunk in enumerate(chunks[start_chunk:], start=start_chunk):
         print(f"\tTranslating chunk {i + 1}/{len(chunks)}...")
         try:
-            translated_chunk = translate_chunk(
-                client, chunk, from_lang, to_lang, model=model
-            )
+            translated_chunk = translate_chunk(llm, chunk, from_lang, to_lang)
             translated_chunks.append(translated_chunk)
 
             if progress_file and chapter is not None:
@@ -147,15 +150,14 @@ def translate_text(
 
 
 def translate(
-    client,
-    input_epub_path,
-    output_epub_path,
-    from_chapter=0,
-    to_chapter=9999,
-    from_lang="EN",
-    to_lang="HU",
-    progress_file=None,
-    model=None,
+    llm: LLM,
+    input_epub_path: str,
+    output_epub_path: str,
+    from_chapter: int = 0,
+    to_chapter: int = 9999,
+    from_lang: str = "EN",
+    to_lang: str = "HU",
+    progress_file: Optional[str] = None,
 ):
     book = epub.read_epub(input_epub_path)
 
@@ -174,13 +176,12 @@ def translate(
                     )
                     soup = BeautifulSoup(item.content, "html.parser")
                     translated_text = translate_text(
-                        client,
+                        llm,
                         str(soup),
                         from_lang,
                         to_lang,
                         progress_file,
                         current_chapter,
-                        model=model,
                     )
                     item.content = translated_text.encode("utf-8")
 
@@ -232,23 +233,62 @@ def show_chapters(input_epub_path):
     print(f"Total characters in the book: {total_characters}")
 
 
-def initialize_llm_client(api_key, base_url):
+def initialize_llm_client(provider: str, config: dict) -> LLM:
     """
-    Initialize the OpenAI client with GEMINI base URL.
+    Initialize the LLM client based on the provider.
     """
-    print("api key", api_key)
-    print("base_url", base_url)
-    return (
-        OpenAI(api_key=api_key)
-        if base_url is None
-        else OpenAI(api_key=api_key, base_url=base_url)
-    )
+    if provider == "openai":
+        api_key = config["openai"]["api_key"]
+        model = config["openai"].get("model", "gpt-4o")
+        print(f"Initializing OpenAI with model: {model}")
+        return OpenAI(
+            api_key=api_key,
+            model=model,
+            temperature=0.2,
+        )
+
+    elif provider == "azure":
+        api_key = config["azure"]["api_key"]
+        azure_endpoint = config["azure"]["endpoint"]
+        api_version = config["azure"].get("api_version", "2024-02-01")
+        deployment_name = config["azure"]["deployment_name"]
+        print(f"Initializing Azure OpenAI with deployment: {deployment_name}")
+        return AzureOpenAI(
+            api_key=api_key,
+            azure_endpoint=azure_endpoint,
+            api_version=api_version,
+            deployment_name=deployment_name,
+            temperature=0.2,
+        )
+
+    elif provider == "gemini":
+        api_key = config["gemini"]["api_key"]
+        model = config["gemini"].get("model", "gemini-1.5-flash")
+        print(f"Initializing Gemini with model: {model}")
+        return Gemini(
+            api_key=api_key,
+            model=model,
+            temperature=0.2,
+        )
+
+    elif provider == "ollama":
+        model = config["ollama"].get("model", "llama3.1")
+        base_url = config["ollama"].get("base_url", "http://localhost:11434")
+        print(f"Initializing Ollama with model: {model} at {base_url}")
+        return Ollama(
+            model=model,
+            base_url=base_url,
+            temperature=0.2,
+        )
+
+    else:
+        raise ValueError(f"Unsupported provider: {provider}")
 
 
 if __name__ == "__main__":
     # Create the top-level parser
     parser = argparse.ArgumentParser(
-        description="App to translate or show chapters of a book."
+        description="App to translate or show chapters of a book using LlamaIndex."
     )
     subparsers = parser.add_subparsers(dest="mode", help="Mode of operation.")
 
@@ -272,7 +312,7 @@ if __name__ == "__main__":
     )
     parser_translate.add_argument(
         "--llm-provider",
-        choices=["openai", "gemini"],
+        choices=["openai", "azure", "gemini", "ollama"],
         required=True,
         help="LLM provider to use for translation.",
     )
@@ -289,22 +329,12 @@ if __name__ == "__main__":
     # Call the appropriate function based on the mode
     if args.mode == "translate":
         config = read_config(args.config)
-        from_chapter = int(args.from_chapter or 0)  # Default to 0 if not provided
-        to_chapter = int(args.to_chapter or 9999)  # Default to 9999 if not provided
+        from_chapter = int(args.from_chapter or 0)
+        to_chapter = int(args.to_chapter or 9999)
         from_lang = args.from_lang
         to_lang = args.to_lang
-        if args.llm_provider == "openai":
-            api_key = config["openai"]["api_key"]
-            base_url = None
-            model = "gpt-4o"
-        else:  # gemini
-            api_key = config["gemini"]["api_key"]
-            base_url = config["gemini"].get(
-                "base_url", "https://generativelanguage.googleapis.com/v1beta/"
-            )
-            model = "gemini-2.5-flash-preview-05-20"
 
-        llm_client = initialize_llm_client(api_key=api_key, base_url=base_url)
+        llm_client = initialize_llm_client(args.llm_provider, config)
 
         # Perform translation
         translate(
@@ -316,7 +346,6 @@ if __name__ == "__main__":
             from_lang,
             to_lang,
             args.progress_file,
-            model=model,
         )
 
     elif args.mode == "show-chapters":
