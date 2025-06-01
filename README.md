@@ -1,6 +1,8 @@
-# Translate books with GPT
+# Translate books with LLMs
 
-This project harnesses the power of GPT-4 LLM to translate eBooks from any language into your preferred language, maintaining the integrity and structure of the original content. Imagine having access to a vast world of literature, regardless of the original language, right at your fingertips.
+The original project seems abadoned so i am making this fork, feel free to contribute.
+
+This project harnesses the power of LLMs to translate eBooks from any language into your preferred language, maintaining the integrity and structure of the original content. Imagine having access to a vast world of literature, regardless of the original language, right at your fingertips.
 
 This tool not only translates the text but also carefully compiles each element of the eBook – chapters, footnotes, and all – into a perfectly formatted EPUB file. We use the `gpt-4-1106-preview` (GPT-4 Turbo) model by default to ensure high-quality translations. However, we understand the need for flexibility, so we've made it easy to switch models in `main.py` according to your specific needs.
 
@@ -10,6 +12,7 @@ This tool not only translates the text but also carefully compiles each element 
 To install the necessary components for our project, follow these simple steps:
 
 ```bash
+python -m venv venv
 pip install -r requirements.txt
 cp config.yaml.example config.yaml
 ```
