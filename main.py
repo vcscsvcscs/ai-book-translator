@@ -289,8 +289,8 @@ if __name__ == "__main__":
     # Call the appropriate function based on the mode
     if args.mode == "translate":
         config = read_config(args.config)
-        from_chapter = int(args.from_chapter)
-        to_chapter = int(args.to_chapter)
+        from_chapter = int(args.from_chapter or 0)  # Default to 0 if not provided
+        to_chapter = int(args.to_chapter or 9999)  # Default to 9999 if not provided
         from_lang = args.from_lang
         to_lang = args.to_lang
         if args.llm_provider == "openai":
