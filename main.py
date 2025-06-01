@@ -1,6 +1,9 @@
 import argparse
 import re
 import yaml
+import json
+import time
+from pathlib import Path
 
 import ebooklib
 from ebooklib import epub
@@ -15,7 +18,7 @@ def read_config(config_file):
     return config
 
 
-def split_html_by_sentence(html_str, max_chunk_size=10000):
+def split_html_by_sentence(html_str, max_chunk_size=20000):
     sentences = html_str.split(". ")
 
     chunks = []
@@ -52,27 +55,93 @@ def system_prompt(from_lang: str, to_lang: str) -> str:
     )
 
 
-def translate_chunk(client, text, from_lang="EN", to_lang="PL"):
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        temperature=0.2,
-        messages=[
-            {"role": "system", "content": system_prompt(from_lang, to_lang)},
-            {"role": "user", "content": text},
-        ],
-    )
+def translate_chunk(
+    client,
+    text,
+    from_lang="EN",
+    to_lang="BG",
+    max_retries=3,
+    retry_delay=180,
+    model=None,
+):
+    for attempt in range(max_retries):
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                temperature=0.2,
+                messages=[
+                    {"role": "system", "content": system_prompt(from_lang, to_lang)},
+                    {"role": "user", "content": text},
+                ],
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            if "rate limit" in str(e).lower():
+                if attempt < max_retries - 1:
+                    print(
+                        f"Rate limit hit. Waiting {retry_delay} seconds before retry {attempt + 1}/{max_retries}"
+                    )
+                    time.sleep(retry_delay)
+                    continue
+            raise
 
-    translated_text = response.choices[0].message.content
-    return translated_text
+
+def save_progress(progress_file, chapter, chunk_index, total_chunks):
+    with open(progress_file, "w") as f:
+        json.dump(
+            {
+                "chapter": chapter,
+                "chunk_index": chunk_index,
+                "total_chunks": total_chunks,
+                "timestamp": time.time(),
+            },
+            f,
+        )
 
 
-def translate_text(client, text, from_lang="EN", to_lang="PL"):
+def load_progress(progress_file):
+    if Path(progress_file).exists():
+        with open(progress_file, "r") as f:
+            return json.load(f)
+    return None
+
+
+def translate_text(
+    client,
+    text,
+    from_lang="English",
+    to_lang="Hungarian",
+    progress_file=None,
+    chapter=None,
+    model=None,
+):
     translated_chunks = []
     chunks = split_html_by_sentence(text)
 
-    for i, chunk in enumerate(chunks):
-        print("\tTranslating chunk %d/%d..." % (i + 1, len(chunks)))
-        translated_chunks.append(translate_chunk(client, chunk, from_lang, to_lang))
+    # Load progress if available
+    start_chunk = 0
+    if progress_file and chapter is not None:
+        progress = load_progress(progress_file)
+        if progress and progress["chapter"] == chapter:
+            start_chunk = progress["chunk_index"]
+            translated_chunks = [
+                ""
+            ] * start_chunk  # Placeholder for already translated chunks
+
+    for i, chunk in enumerate(chunks[start_chunk:], start=start_chunk):
+        print(f"\tTranslating chunk {i + 1}/{len(chunks)}...")
+        try:
+            translated_chunk = translate_chunk(
+                client, chunk, from_lang, to_lang, model=model
+            )
+            translated_chunks.append(translated_chunk)
+
+            if progress_file and chapter is not None:
+                save_progress(progress_file, chapter, i + 1, len(chunks))
+
+        except Exception as e:
+            print(f"Error translating chunk {i + 1}: {str(e)}")
+            raise
 
     return " ".join(translated_chunks)
 
@@ -84,7 +153,9 @@ def translate(
     from_chapter=0,
     to_chapter=9999,
     from_lang="EN",
-    to_lang="PL",
+    to_lang="HU",
+    progress_file=None,
+    model=None,
 ):
     book = epub.read_epub(input_epub_path)
 
@@ -93,17 +164,46 @@ def translate(
         [i for i in book.get_items() if i.get_type() == ebooklib.ITEM_DOCUMENT]
     )
 
-    for item in book.get_items():
-        if item.get_type() == ebooklib.ITEM_DOCUMENT:
-            if current_chapter >= from_chapter and current_chapter <= to_chapter:
-                print("Processing chapter %d/%d..." % (current_chapter, chapters_count))
-                soup = BeautifulSoup(item.content, "html.parser")
-                translated_text = translate_text(client, str(soup), from_lang, to_lang)
-                item.content = translated_text.encode("utf-8")
+    try:
+        for item in book.get_items():
+            if item.get_type() == ebooklib.ITEM_DOCUMENT:
+                if from_chapter <= current_chapter <= to_chapter:
+                    print(
+                        "Processing chapter %d/%d..."
+                        % (current_chapter, chapters_count)
+                    )
+                    soup = BeautifulSoup(item.content, "html.parser")
+                    translated_text = translate_text(
+                        client,
+                        str(soup),
+                        from_lang,
+                        to_lang,
+                        progress_file,
+                        current_chapter,
+                        model=model,
+                    )
+                    item.content = translated_text.encode("utf-8")
 
-            current_chapter += 1
+                    # Save intermediate progress after each chapter
+                    epub.write_epub(f"{output_epub_path}.partial", book, {})
 
-    epub.write_epub(output_epub_path, book, {})
+                current_chapter += 1
+
+        # Clean up progress file and write final epub
+        if progress_file is not None and Path(progress_file).exists():
+            Path(progress_file).unlink()
+        if Path(f"{output_epub_path}.partial").exists():
+            Path(f"{output_epub_path}.partial").unlink()
+
+        epub.write_epub(output_epub_path, book, {})
+
+    except Exception as e:
+        print(f"Translation interrupted: {str(e)}")
+        print(
+            f"Progress saved. You can resume from chapter {current_chapter} using --from-chapter {current_chapter}"
+        )
+        # Keep the progress file and partial epub in case of error
+        raise
 
 
 def show_chapters(input_epub_path):
@@ -193,16 +293,30 @@ if __name__ == "__main__":
         to_chapter = int(args.to_chapter)
         from_lang = args.from_lang
         to_lang = args.to_lang
-        openai_client = OpenAI(api_key=config["openai"]["api_key"])
+        if args.llm_provider == "openai":
+            api_key = config["openai"]["api_key"]
+            base_url = None
+            model = "gpt-4o"
+        else:  # gemini
+            api_key = config["gemini"]["api_key"]
+            base_url = config["gemini"].get(
+                "base_url", "https://generativelanguage.googleapis.com/v1beta/"
+            )
+            model = "gemini-2.0-flash-exp"
 
+        llm_client = initialize_llm_client(api_key=api_key, base_url=base_url)
+
+        # Perform translation
         translate(
-            openai_client,
+            llm_client,
             args.input,
             args.output,
             from_chapter,
             to_chapter,
             from_lang,
             to_lang,
+            args.progress_file,
+            model=model,
         )
 
     elif args.mode == "show-chapters":
