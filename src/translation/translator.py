@@ -3,6 +3,7 @@ Main translation logic.
 """
 
 import time
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -26,11 +27,13 @@ class BookTranslator:
         max_retries: int = 3,
         retry_delay: int = 180,
         progress_file: Optional[str] = None,
+        extra_prompts: str = "",
     ):
         self.llm = llm
         self.chunker = TextChunker(chunk_size)
         self.max_retries = max_retries
         self.retry_delay = retry_delay
+        self.extra_prompts = extra_prompts
         self.progress_tracker = (
             ProgressTracker(progress_file) if progress_file else None
         )
@@ -72,6 +75,10 @@ class BookTranslator:
                 print(f"   - Current chapter: {progress.current_chapter}")
 
         current_chapter = 1
+        
+        # Initialize markdown output file
+        md_output_path = self._get_markdown_path(output_path)
+        self._initialize_markdown_file(md_output_path, from_lang, to_lang)
 
         try:
             for item in chapters:
@@ -79,6 +86,12 @@ class BookTranslator:
                     print(
                         f"\n🔄 Processing chapter {current_chapter}/{total_chapters}..."
                     )
+
+                    # Check if chapter is already completed
+                    if self.progress_tracker and self.progress_tracker.is_chapter_completed(current_chapter):
+                        print(f"✅ Chapter {current_chapter} already completed, skipping...")
+                        current_chapter += 1
+                        continue
 
                     # Load progress if available
                     start_chunk = 0
@@ -94,22 +107,21 @@ class BookTranslator:
                         item, from_lang, to_lang, current_chapter, start_chunk
                     )
 
-                    # Update book content
-                    item.content = translated_content.encode("utf-8")
+                    # Save translated chapter to markdown
+                    self._save_chapter_to_markdown(
+                        md_output_path, current_chapter, translated_content, item
+                    )
 
                     # Mark chapter as complete
                     if self.progress_tracker:
                         self.progress_tracker.complete_chapter(current_chapter)
 
-                    # Save intermediate progress
-                    self._save_intermediate_progress(output_path, book)
-
-                    print(f"✅ Chapter {current_chapter} completed")
+                    print(f"✅ Chapter {current_chapter} completed and saved")
 
                 current_chapter += 1
 
-            # Final cleanup and save
-            self._finalize_translation(output_path, book)
+            # Finalize markdown file
+            self._finalize_markdown(md_output_path)
 
         except Exception as e:
             print(f"\n❌ Translation interrupted at chapter {current_chapter}")
@@ -129,7 +141,9 @@ class BookTranslator:
     ) -> str:
         """Translate a single chapter."""
         soup = BeautifulSoup(item.content, "html.parser")
-        text = str(soup)
+        
+        # Extract clean text content, preserving structure
+        text = self._extract_clean_text(soup)
 
         chunks = self.chunker.split_text(text)
         total_chunks = len(chunks)
@@ -140,15 +154,7 @@ class BookTranslator:
         if self.progress_tracker:
             self.progress_tracker.start_chapter(chapter_num, total_chunks)
 
-        # Prepare translated chunks list
         translated_chunks = []
-        
-        # If resuming, we need to reconstruct the already translated chunks
-        if start_chunk > 0:
-            print(f"  📄 Skipping first {start_chunk} chunks (already translated)")
-            # For simplicity, we'll re-translate the entire chapter
-            # A more sophisticated approach would store translated chunks
-            start_chunk = 0
 
         for i, chunk in enumerate(chunks[start_chunk:], start=start_chunk):
             print(f"    🔄 Chunk {i + 1}/{total_chunks}...")
@@ -169,7 +175,22 @@ class BookTranslator:
                     self.progress_tracker.record_error(chapter_num, str(e))
                 raise TranslationError(f"Failed to translate chunk {i + 1}: {e}")
 
-        return " ".join(translated_chunks)
+        return "\n\n".join(translated_chunks)
+
+    def _extract_clean_text(self, soup: BeautifulSoup) -> str:
+        """Extract clean text from HTML, preserving paragraph structure."""
+        # Remove script and style elements
+        for script in soup(["script", "style"]):
+            script.decompose()
+        
+        # Get text with some structure preservation
+        text = soup.get_text(separator='\n\n', strip=True)
+        
+        # Clean up excessive whitespace
+        text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)
+        text = re.sub(r'[ \t]+', ' ', text)
+        
+        return text.strip()
 
     def _translate_chunk(self, text: str, from_lang: str, to_lang: str) -> str:
         """Translate a single chunk of text."""
@@ -202,7 +223,7 @@ class BookTranslator:
                 raise TranslationError(
                     f"Translation failed after {self.max_retries} attempts: {e}"
                 )
-        # If somehow all attempts are exhausted without raising, return an empty string
+        
         return ""
 
     def _create_translation_prompt(
@@ -210,39 +231,47 @@ class BookTranslator:
     ) -> str:
         """Create translation prompt."""
         return (
-            f"You are a {from_lang}-to-{to_lang} specialized translator. "
-            f"Keep all special characters and HTML tags exactly as in the source text. "
-            f"Your translation should be in {to_lang} only. "
-            f"Ensure the translation is comfortable to read by avoiding overly literal translations. "
-            f"Maintain readability and consistency with the source text. "
-            f"Do not add any explanations or comments, just provide the translation.\n\n"
+            f"You are a professional {from_lang}-to-{to_lang} translator. "
+            f"Translate the following text naturally and fluently to {to_lang}. "
+            f"{self.extra_prompts}. "
+            f"Maintain readability and consistency with the source text while making it read naturally in {to_lang}. "
+            f"Do not add explanations, comments, or notes - only provide the translation.\n\n"
             f"Text to translate:\n{text}"
         )
 
-    def _save_intermediate_progress(self, output_path: str, book):
-        """Save intermediate progress."""
-        partial_path = f"{output_path}.partial"
-        try:
-            epub.write_epub(partial_path, book, {})
-        except Exception as e:
-            print(f"⚠️  Warning: Could not save intermediate progress: {e}")
+    def _get_markdown_path(self, output_path: str) -> str:
+        """Convert output path to markdown format."""
+        path = Path(output_path)
+        return str(path.with_suffix('.md'))
 
-    def _finalize_translation(self, output_path: str, book):
-        """Finalize translation and cleanup."""
-        try:
-            # Write final EPUB
-            epub.write_epub(output_path, book, {})
+    def _initialize_markdown_file(self, md_path: str, from_lang: str, to_lang: str):
+        """Initialize the markdown file with header."""
+        with open(md_path, 'w', encoding='utf-8') as f:
+            f.write(f"# Translated Book ({from_lang} → {to_lang})\n\n")
+            f.write(f"*Translation generated on {time.strftime('%Y-%m-%d %H:%M:%S')}*\n\n")
+            f.write("---\n\n")
 
-            # Cleanup
-            partial_path = Path(f"{output_path}.partial")
-            if partial_path.exists():
-                partial_path.unlink()
+    def _save_chapter_to_markdown(self, md_path: str, chapter_num: int, content: str, item):
+        """Save a translated chapter to the markdown file."""
+        # Extract chapter title if available
+        soup = BeautifulSoup(item.content, "html.parser")
+        title_elem = soup.find(['h1', 'h2', 'title'])
+        chapter_title = title_elem.get_text(strip=True) if title_elem else f"Chapter {chapter_num}"
+        
+        if content != "":
+            with open(md_path, 'a', encoding='utf-8') as f:
+                f.write(f"## {content}\n\n")
+                f.write("---\n\n")
+        
+        print(f"  💾 Chapter saved to markdown: {chapter_title}")
 
-            if self.progress_tracker:
-                self.progress_tracker.cleanup()
-
-            print("\n🎉 Translation completed successfully!")
-            print(f"📖 Output saved to: {output_path}")
-
-        except Exception as e:
-            raise TranslationError(f"Failed to finalize translation: {e}")
+    def _finalize_markdown(self, md_path: str):
+        """Finalize the markdown file."""
+        with open(md_path, 'a', encoding='utf-8') as f:
+            f.write(f"\n*Translation completed on {time.strftime('%Y-%m-%d %H:%M:%S')}*\n")
+        
+        print("\n🎉 Translation completed successfully!")
+        print(f"📖 Output saved to: {md_path}")
+        
+        if self.progress_tracker:
+            self.progress_tracker.cleanup()

@@ -263,6 +263,21 @@ class ProgressTracker:
 
             self._notify_callbacks("chapter_completed", chapter_progress)
 
+    def is_chapter_completed(self, chapter_number: int) -> bool:
+        """
+        Check if a chapter is completed.
+
+        Args:
+            chapter_number: Chapter number to check
+
+        Returns:
+            True if chapter is completed, False otherwise
+        """
+        if not self._progress or chapter_number not in self._progress.chapters:
+            return False
+        
+        return self._progress.chapters[chapter_number].is_completed
+
     def record_error(self, chapter_number: int, error_message: str) -> None:
         """
         Record an error for a specific chapter.

@@ -75,6 +75,12 @@ Examples:
     translate_parser.add_argument(
         "--max-retries", type=int, default=3, help="Maximum retry attempts"
     )
+    translate_parser.add_argument(
+        "--extra-prompts",
+        type=str,
+        default="Preserve paragraph breaks and formatting structure. ",
+        help="Extra prompts for translation",
+    )
 
     # Show chapters command
     show_parser = subparsers.add_parser(
@@ -137,6 +143,7 @@ def handle_translate(args):
             llm=llm,
             chunk_size=args.chunk_size,
             max_retries=args.max_retries,
+            extra_prompts=args.extra_prompts,
             progress_file=args.progress_file,
         )
 
