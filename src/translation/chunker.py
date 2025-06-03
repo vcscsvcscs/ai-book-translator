@@ -6,6 +6,7 @@ import re
 from typing import List
 from dataclasses import dataclass
 
+
 @dataclass
 class ChunkMetadata:
     """Metadata for a text chunk."""
