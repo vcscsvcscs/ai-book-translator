@@ -9,7 +9,7 @@ from typing import Optional, Dict, Any
 from dataclasses import dataclass, asdict
 from datetime import datetime
 
-from ..utils.exceptions import ProgressError
+from utils.exceptions import ProgressError
 
 
 @dataclass

@@ -10,8 +10,8 @@ import ebooklib
 from ebooklib import epub
 from bs4 import BeautifulSoup
 
-from ..utils.exceptions import EpubError
-from ..utils.text_utils import extract_text_from_html
+from utils.exceptions import EpubError
+from utils.text_utils import extract_text_from_html
 
 
 class EPUBChapter:

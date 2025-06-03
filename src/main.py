@@ -9,7 +9,8 @@ import sys
 from config.config_loader import ConfigLoader
 from llm.factory import LLMFactory
 from translation.translator import BookTranslator
-from epub.analyzer import EpubAnalyzer
+from epub.reader import EPUBReader
+from epub.analyzer import EnhancedEpubAnalyzer
 from utils.exceptions import TranslationError, ConfigurationError
 
 
@@ -83,6 +84,17 @@ Examples:
     show_parser.add_argument(
         "--detailed", action="store_true", help="Show detailed chapter info"
     )
+    show_parser.add_argument(
+        "--model",
+        default="gpt-4o",
+        help="Model name for tokenization (default: gpt-4o)",
+    )
+    show_parser.add_argument(
+        "--from-lang", default="en", help="Source language code (default: en)"
+    )
+    show_parser.add_argument(
+        "--to-lang", help="Target language code for translation cost estimation"
+    )
 
     return parser
 
@@ -90,8 +102,19 @@ Examples:
 def handle_show_chapters(args):
     """Handle show-chapters command."""
     try:
-        analyzer = EpubAnalyzer(args.input)
-        analyzer.show_chapters(detailed=args.detailed)
+        # Create EPUBReader first
+        reader = EPUBReader(args.input)
+
+        # Create analyzer with the reader
+        analyzer = EnhancedEpubAnalyzer(reader, args.model)
+
+        # Show chapters with optional translation estimation
+        analyzer.show_chapters(
+            detailed=args.detailed,
+            source_language=args.from_lang,
+            target_language=args.to_lang,
+        )
+
     except Exception as e:
         print(f"Error analyzing book: {e}")
         return 1
