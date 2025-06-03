@@ -4,3 +4,8 @@ books/
 .DS_Store
 venv/
 data/
+# Ignore Python cache files
+__pycache__/
+**.pyc
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
