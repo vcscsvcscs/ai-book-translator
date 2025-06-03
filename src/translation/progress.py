@@ -107,7 +107,7 @@ class ProgressTracker:
         self.auto_save = auto_save
         self._progress: Optional[TranslationProgress] = None
         self._callbacks = []
-        
+
         # Automatically load existing progress if file exists
         if self.progress_file and self.progress_file.exists():
             try:
@@ -130,7 +130,7 @@ class ProgressTracker:
             print("📄 Resuming existing translation progress...")
             self._progress.total_chapters = total_chapters
             self._progress.last_update_time = current_time
-            
+
             # Recalculate completed chapters count in case it's out of sync
             completed_count = sum(
                 1 for cp in self._progress.chapters.values() if cp.is_completed
@@ -173,7 +173,9 @@ class ProgressTracker:
             # Update total chunks in case it changed
             existing_chapter.total_chunks = total_chunks
             existing_chapter.last_update_time = current_time
-            print(f"📄 Resuming chapter {chapter_number} from chunk {existing_chapter.completed_chunks + 1}/{total_chunks}")
+            print(
+                f"📄 Resuming chapter {chapter_number} from chunk {existing_chapter.completed_chunks + 1}/{total_chunks}"
+            )
         else:
             # Create new chapter progress
             chapter_progress = ChapterProgress(
@@ -191,7 +193,9 @@ class ProgressTracker:
         if self.auto_save:
             self._save_progress()
 
-        self._notify_callbacks("chapter_started", self._progress.chapters[chapter_number])
+        self._notify_callbacks(
+            "chapter_started", self._progress.chapters[chapter_number]
+        )
 
     def update_progress(
         self,
@@ -275,7 +279,7 @@ class ProgressTracker:
         """
         if not self._progress or chapter_number not in self._progress.chapters:
             return False
-        
+
         return self._progress.chapters[chapter_number].is_completed
 
     def record_error(self, chapter_number: int, error_message: str) -> None:

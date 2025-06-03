@@ -58,7 +58,9 @@ Examples:
         "--to-lang", default="PL", help="Target language code"
     )
     translate_parser.add_argument(
-        "--progress-file", help="File to save translation progress", default="data/progress.json"
+        "--progress-file",
+        help="File to save translation progress",
+        default="data/progress.json",
     )
     translate_parser.add_argument(
         "--llm-provider",
