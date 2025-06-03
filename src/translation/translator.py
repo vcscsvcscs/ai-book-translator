@@ -1,24 +1,34 @@
 """
-Main translation logic.
+Enhanced translation logic with multiple output format support.
 """
 
 import time
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Set
+from enum import Enum
 
 import ebooklib
 from ebooklib import epub
 from bs4 import BeautifulSoup
 from llama_index.core.llms import LLM
+import html
 
 from .chunker import TextChunker
 from .progress import ProgressTracker
 from utils.exceptions import TranslationError
 
 
+class OutputFormat(Enum):
+    """Supported output formats."""
+
+    EPUB = "epub"
+    PDF = "pdf"
+    MARKDOWN = "markdown"
+
+
 class BookTranslator:
-    """Handles book translation using LLM providers."""
+    """Handles book translation using LLM providers with multiple output formats."""
 
     def __init__(
         self,
@@ -28,6 +38,7 @@ class BookTranslator:
         retry_delay: int = 180,
         progress_file: Optional[str] = None,
         extra_prompts: str = "",
+        output_formats: Optional[List[str]] = None,
     ):
         self.llm = llm
         self.chunker = TextChunker(chunk_size)
@@ -38,6 +49,28 @@ class BookTranslator:
             ProgressTracker(progress_file) if progress_file else None
         )
 
+        # Parse output formats
+        self.output_formats = self._parse_output_formats(output_formats or ["markdown"])
+
+        # Store translated chapters for multi-format output
+        self.translated_chapters = []
+
+    def _parse_output_formats(self, formats: List[str]) -> Set[OutputFormat]:
+        """Parse and validate output formats."""
+        valid_formats = set()
+        for fmt in formats:
+            try:
+                valid_formats.add(OutputFormat(fmt.lower()))
+            except ValueError:
+                raise TranslationError(
+                    f"Invalid output format: {fmt}. Supported formats: epub, pdf, markdown"
+                )
+
+        if not valid_formats:
+            valid_formats.add(OutputFormat.MARKDOWN)  # Default fallback
+
+        return valid_formats
+
     def translate_book(
         self,
         input_path: str,
@@ -47,7 +80,7 @@ class BookTranslator:
         from_lang: str = "EN",
         to_lang: str = "HU",
     ):
-        """Translate entire book."""
+        """Translate entire book and generate requested output formats."""
         try:
             book = epub.read_epub(input_path)
         except Exception as e:
@@ -61,24 +94,28 @@ class BookTranslator:
         print(
             f"📖 Processing chapters {from_chapter} to {min(to_chapter, total_chapters)}"
         )
+        print(
+            f"📄 Output formats: {', '.join([fmt.value for fmt in self.output_formats])}"
+        )
 
         # Initialize progress tracking
         if self.progress_tracker:
             self.progress_tracker.start_translation(total_chapters)
-            
+
             # Show progress summary if resuming
             progress = self.progress_tracker.get_overall_progress()
             if progress and progress.chapters:
                 print("📄 Resuming from previous session:")
-                print(f"   - Overall progress: {progress.overall_progress_percentage:.1f}%")
-                print(f"   - Completed chapters: {progress.completed_chapters}/{progress.total_chapters}")
+                print(
+                    f"   - Overall progress: {progress.overall_progress_percentage:.1f}%"
+                )
+                print(
+                    f"   - Completed chapters: {progress.completed_chapters}/{progress.total_chapters}"
+                )
                 print(f"   - Current chapter: {progress.current_chapter}")
 
         current_chapter = 1
-        
-        # Initialize markdown output file
-        md_output_path = self._get_markdown_path(output_path)
-        self._initialize_markdown_file(md_output_path, from_lang, to_lang)
+        self.translated_chapters = []  # Reset for new translation
 
         try:
             for item in chapters:
@@ -88,8 +125,13 @@ class BookTranslator:
                     )
 
                     # Check if chapter is already completed
-                    if self.progress_tracker and self.progress_tracker.is_chapter_completed(current_chapter):
-                        print(f"✅ Chapter {current_chapter} already completed, skipping...")
+                    if (
+                        self.progress_tracker
+                        and self.progress_tracker.is_chapter_completed(current_chapter)
+                    ):
+                        print(
+                            f"✅ Chapter {current_chapter} already completed, skipping..."
+                        )
                         current_chapter += 1
                         continue
 
@@ -107,26 +149,297 @@ class BookTranslator:
                         item, from_lang, to_lang, current_chapter, start_chunk
                     )
 
-                    # Save translated chapter to markdown
-                    self._save_chapter_to_markdown(
-                        md_output_path, current_chapter, translated_content, item
-                    )
+                    # Store chapter data for multi-format output
+                    chapter_data = {
+                        "number": current_chapter,
+                        "title": self._extract_chapter_title(item, current_chapter),
+                        "content": translated_content,
+                        "original_item": item,
+                    }
+                    self.translated_chapters.append(chapter_data)
 
                     # Mark chapter as complete
                     if self.progress_tracker:
                         self.progress_tracker.complete_chapter(current_chapter)
 
-                    print(f"✅ Chapter {current_chapter} completed and saved")
+                    print(f"✅ Chapter {current_chapter} completed")
 
                 current_chapter += 1
 
-            # Finalize markdown file
-            self._finalize_markdown(md_output_path)
+            # Generate all requested output formats
+            self._generate_outputs(book, output_path, from_lang, to_lang)
 
         except Exception as e:
             print(f"\n❌ Translation interrupted at chapter {current_chapter}")
             print(f"💾 Progress saved. Resume with: --from-chapter {current_chapter}")
             raise TranslationError(f"Translation failed: {e}")
+
+    def _generate_outputs(
+        self, original_book, output_path: str, from_lang: str, to_lang: str
+    ):
+        """Generate all requested output formats."""
+        base_path = Path(output_path).with_suffix("")
+
+        for format_type in self.output_formats:
+            try:
+                if format_type == OutputFormat.MARKDOWN:
+                    self._generate_markdown(
+                        base_path.with_suffix(".md"), from_lang, to_lang
+                    )
+                elif format_type == OutputFormat.EPUB:
+                    self._generate_epub(
+                        original_book,
+                        base_path.with_suffix(".epub"),
+                        from_lang,
+                        to_lang,
+                    )
+                elif format_type == OutputFormat.PDF:
+                    self._generate_pdf(
+                        base_path.with_suffix(".pdf"), from_lang, to_lang
+                    )
+
+                print(f"✅ {format_type.value.upper()} output generated")
+
+            except Exception as e:
+                print(f"❌ Failed to generate {format_type.value.upper()}: {e}")
+
+    def _generate_markdown(self, output_path: Path, from_lang: str, to_lang: str):
+        """Generate Markdown output."""
+        with open(output_path, "w", encoding="utf-8") as f:
+            # Write header
+            f.write(f"# Translated Book ({from_lang} → {to_lang})\n\n")
+            f.write(
+                f"*Translation generated on {time.strftime('%Y-%m-%d %H:%M:%S')}*\n\n"
+            )
+            f.write("---\n\n")
+
+            # Write chapters
+            for chapter in self.translated_chapters:
+                if chapter["content"].strip():
+                    f.write(f"## {chapter['title']}\n\n")
+                    f.write(f"{chapter['content']}\n\n")
+                    f.write("---\n\n")
+
+            # Write footer
+            f.write(
+                f"\n*Translation completed on {time.strftime('%Y-%m-%d %H:%M:%S')}*\n"
+            )
+
+        print(f"📖 Markdown saved to: {output_path}")
+
+    def _generate_epub(
+        self, original_book, output_path: Path, from_lang: str, to_lang: str
+    ):
+        """Generate EPUB output with proper XML handling."""
+        try:
+            # Create new book based on original
+            new_book = epub.EpubBook()
+
+            # Copy metadata
+            new_book.set_identifier(
+                original_book.get_metadata("DC", "identifier")[0][0]
+                if original_book.get_metadata("DC", "identifier")
+                else "translated_book"
+            )
+
+            original_title = (
+                original_book.get_metadata("DC", "title")[0][0]
+                if original_book.get_metadata("DC", "title")
+                else "Translated Book"
+            )
+            new_book.set_title(f"{original_title} ({from_lang} → {to_lang})")
+
+            new_book.set_language(to_lang.lower())
+
+            if original_book.get_metadata("DC", "creator"):
+                new_book.add_author(original_book.get_metadata("DC", "creator")[0][0])
+
+            # Copy non-document items (CSS, images, etc.)
+            for item in original_book.get_items():
+                if item.get_type() != ebooklib.ITEM_DOCUMENT:
+                    new_book.add_item(item)
+
+            # Add translated chapters with proper XML structure
+            spine_items = []
+
+            for chapter in self.translated_chapters:
+                if not chapter["content"].strip():
+                    continue
+
+                # Create clean XHTML content
+                xhtml_content = self._create_clean_xhtml(
+                    chapter["title"], chapter["content"]
+                )
+
+                # Create chapter item
+                chapter_item = epub.EpubHtml(
+                    title=chapter["title"],
+                    file_name=f"chapter_{chapter['number']:03d}.xhtml",
+                    lang=to_lang.lower(),
+                )
+
+                chapter_item.content = xhtml_content.encode("utf-8")
+                new_book.add_item(chapter_item)
+                spine_items.append(chapter_item)
+
+            # Set spine (reading order)
+            new_book.spine = ["nav"] + spine_items
+
+            # Add navigation
+            new_book.add_item(epub.EpubNcx())
+            new_book.add_item(epub.EpubNav())
+
+            # Set table of contents
+            toc_items = []
+            for i, chapter in enumerate(self.translated_chapters):
+                if chapter["content"].strip():
+                    toc_items.append(
+                        epub.Link(
+                            f"chapter_{chapter['number']:03d}.xhtml",
+                            chapter["title"],
+                            f"chapter_{chapter['number']}",
+                        )
+                    )
+
+            new_book.toc = toc_items
+
+            # Write EPUB
+            epub.write_epub(str(output_path), new_book, {})
+            print(f"📖 EPUB saved to: {output_path}")
+
+        except Exception as e:
+            raise TranslationError(f"Failed to generate EPUB: {e}")
+
+    def _create_clean_xhtml(self, title: str, content: str) -> str:
+        """Create clean XHTML content with proper XML structure."""
+        # Escape HTML entities in content
+        clean_content = html.escape(content)
+
+        # Convert line breaks to paragraphs
+        paragraphs = clean_content.split("\n\n")
+        formatted_paragraphs = []
+
+        for para in paragraphs:
+            para = para.strip()
+            if para:
+                # Replace single line breaks with spaces
+                para = re.sub(r"\n+", " ", para)
+                formatted_paragraphs.append(f"    <p>{para}</p>")
+
+        xhtml_template = """<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <title>{title}</title>
+    <link rel="stylesheet" type="text/css" href="style.css"/>
+</head>
+<body>
+    <h1>{title}</h1>
+{content}
+</body>
+</html>"""
+
+        return xhtml_template.format(
+            title=html.escape(title), content="\n".join(formatted_paragraphs)
+        )
+
+    def _generate_pdf(self, output_path: Path, from_lang: str, to_lang: str):
+        """Generate PDF output using markdown as intermediate format."""
+        try:
+            import markdown
+            from weasyprint import HTML, CSS
+            from weasyprint.text.fonts import FontConfiguration
+        except ImportError:
+            print("⚠️  PDF generation requires 'markdown' and 'weasyprint' packages")
+            print("   Install with: pip install markdown weasyprint")
+            return
+
+        # Create HTML from markdown content
+        md_content = self._create_markdown_content(from_lang, to_lang)
+        html_content = markdown.markdown(md_content)
+
+        # Add CSS styling
+        css_style = """
+        @page {
+            margin: 2cm;
+            size: A4;
+        }
+        body {
+            font-family: serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: none;
+        }
+        h1 {
+            color: #2c3e50;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #34495e;
+            margin-top: 2em;
+            margin-bottom: 1em;
+            page-break-before: always;
+        }
+        p {
+            text-align: justify;
+            margin-bottom: 1em;
+        }
+        hr {
+            border: none;
+            height: 1px;
+            background-color: #bdc3c7;
+            margin: 2em 0;
+        }
+        """
+
+        # Generate PDF
+        font_config = FontConfiguration()
+        html_doc = HTML(string=html_content, base_url=str(output_path.parent))
+        css_doc = CSS(string=css_style, font_config=font_config)
+
+        html_doc.write_pdf(
+            str(output_path), stylesheets=[css_doc], font_config=font_config
+        )
+        print(f"📖 PDF saved to: {output_path}")
+
+    def _create_markdown_content(self, from_lang: str, to_lang: str) -> str:
+        """Create markdown content from translated chapters."""
+        lines = []
+        lines.append(f"# Translated Book ({from_lang} → {to_lang})")
+        lines.append("")
+        lines.append(f"*Translation generated on {time.strftime('%Y-%m-%d %H:%M:%S')}*")
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
+        for chapter in self.translated_chapters:
+            if chapter["content"].strip():
+                lines.append(f"## {chapter['title']}")
+                lines.append("")
+                lines.append(chapter["content"])
+                lines.append("")
+                lines.append("---")
+                lines.append("")
+
+        lines.append("")
+        lines.append(f"*Translation completed on {time.strftime('%Y-%m-%d %H:%M:%S')}*")
+
+        return "\n".join(lines)
+
+    def _extract_chapter_title(self, item, chapter_num: int) -> str:
+        """Extract chapter title from EPUB item."""
+        try:
+            soup = BeautifulSoup(item.content, "html.parser")
+            title_elem = soup.find(["h1", "h2", "h3", "title"])
+            if title_elem:
+                title = title_elem.get_text(strip=True)
+                if title and len(title) < 100:  # Reasonable title length
+                    return title
+        except Exception:
+            pass
+
+        return f"Chapter {chapter_num}"
 
     def _get_document_items(self, book):
         """Get all document items from the book."""
@@ -141,7 +454,7 @@ class BookTranslator:
     ) -> str:
         """Translate a single chapter."""
         soup = BeautifulSoup(item.content, "html.parser")
-        
+
         # Extract clean text content, preserving structure
         text = self._extract_clean_text(soup)
 
@@ -182,14 +495,14 @@ class BookTranslator:
         # Remove script and style elements
         for script in soup(["script", "style"]):
             script.decompose()
-        
+
         # Get text with some structure preservation
-        text = soup.get_text(separator='\n\n', strip=True)
-        
+        text = soup.get_text(separator="\n\n", strip=True)
+
         # Clean up excessive whitespace
-        text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)
-        text = re.sub(r'[ \t]+', ' ', text)
-        
+        text = re.sub(r"\n\s*\n\s*\n+", "\n\n", text)
+        text = re.sub(r"[ \t]+", " ", text)
+
         return text.strip()
 
     def _translate_chunk(self, text: str, from_lang: str, to_lang: str) -> str:
@@ -223,7 +536,7 @@ class BookTranslator:
                 raise TranslationError(
                     f"Translation failed after {self.max_retries} attempts: {e}"
                 )
-        
+
         return ""
 
     def _create_translation_prompt(
@@ -238,40 +551,3 @@ class BookTranslator:
             f"Do not add explanations, comments, or notes - only provide the translation.\n\n"
             f"Text to translate:\n{text}"
         )
-
-    def _get_markdown_path(self, output_path: str) -> str:
-        """Convert output path to markdown format."""
-        path = Path(output_path)
-        return str(path.with_suffix('.md'))
-
-    def _initialize_markdown_file(self, md_path: str, from_lang: str, to_lang: str):
-        """Initialize the markdown file with header."""
-        with open(md_path, 'w', encoding='utf-8') as f:
-            f.write(f"# Translated Book ({from_lang} → {to_lang})\n\n")
-            f.write(f"*Translation generated on {time.strftime('%Y-%m-%d %H:%M:%S')}*\n\n")
-            f.write("---\n\n")
-
-    def _save_chapter_to_markdown(self, md_path: str, chapter_num: int, content: str, item):
-        """Save a translated chapter to the markdown file."""
-        # Extract chapter title if available
-        soup = BeautifulSoup(item.content, "html.parser")
-        title_elem = soup.find(['h1', 'h2', 'title'])
-        chapter_title = title_elem.get_text(strip=True) if title_elem else f"Chapter {chapter_num}"
-        
-        if content != "":
-            with open(md_path, 'a', encoding='utf-8') as f:
-                f.write(f"## {content}\n\n")
-                f.write("---\n\n")
-        
-        print(f"  💾 Chapter saved to markdown: {chapter_title}")
-
-    def _finalize_markdown(self, md_path: str):
-        """Finalize the markdown file."""
-        with open(md_path, 'a', encoding='utf-8') as f:
-            f.write(f"\n*Translation completed on {time.strftime('%Y-%m-%d %H:%M:%S')}*\n")
-        
-        print("\n🎉 Translation completed successfully!")
-        print(f"📖 Output saved to: {md_path}")
-        
-        if self.progress_tracker:
-            self.progress_tracker.cleanup()

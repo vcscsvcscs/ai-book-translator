@@ -46,6 +46,13 @@ Examples:
         "--config", required=True, help="Configuration file path"
     )
     translate_parser.add_argument(
+        "--output-formats",
+        nargs="+",
+        choices=["epub", "pdf", "markdown"],
+        default=["markdown"],
+        help="Output formats to generate (default: markdown)"
+    )
+    translate_parser.add_argument(
         "--from-chapter", type=int, help="Starting chapter (1-based)"
     )
     translate_parser.add_argument(
@@ -147,6 +154,7 @@ def handle_translate(args):
             max_retries=args.max_retries,
             extra_prompts=args.extra_prompts,
             progress_file=args.progress_file,
+            output_formats=args.output_formats,
         )
 
         # Perform translation
@@ -160,6 +168,28 @@ def handle_translate(args):
         )
 
         print(f"✅ Translation completed successfully: {args.output}")
+
+        from pathlib import Path
+        base_path = Path(args.output).with_suffix('')
+        
+
+        generated_files = []
+        for fmt in args.output_formats:
+            file_path = None
+            if fmt == "markdown":
+                file_path = base_path.with_suffix('.md')
+            elif fmt == "epub":
+                file_path = base_path.with_suffix('.epub')
+            elif fmt == "pdf":
+                file_path = base_path.with_suffix('.pdf')
+            
+            if file_path is not None and file_path.exists():
+                generated_files.append(str(file_path))
+        
+        if generated_files:
+            print("📁 Generated files:")
+            for file_path in generated_files:
+                print(f"   - {file_path}")
 
     except ConfigurationError as e:
         print(f"❌ Configuration error: {e}")
