@@ -74,6 +74,10 @@ class EnhancedEpubAnalyzer:
 
     # Model pricing (per million tokens)
     MODEL_PRICING = {
+        "o3": {"input": 10.00, "output": 40.00},
+        "o1": {"input": 15.00, "output": 60.00},
+        "o4-mini": {"input": 1.10, "output": 4.40},
+        "GPT-4.1-2025-04-14": {"input": 2.00, "output": 8.00},
         "gpt-4o": {"input": 2.50, "output": 10.00},
         "gpt-4o-mini": {"input": 0.15, "output": 0.60},
         "gpt-4-turbo": {"input": 10.00, "output": 30.00},
