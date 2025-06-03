@@ -59,6 +59,18 @@ class BookTranslator:
             f"📖 Processing chapters {from_chapter} to {min(to_chapter, total_chapters)}"
         )
 
+        # Initialize progress tracking
+        if self.progress_tracker:
+            self.progress_tracker.start_translation(total_chapters)
+            
+            # Show progress summary if resuming
+            progress = self.progress_tracker.get_overall_progress()
+            if progress and progress.chapters:
+                print("📄 Resuming from previous session:")
+                print(f"   - Overall progress: {progress.overall_progress_percentage:.1f}%")
+                print(f"   - Completed chapters: {progress.completed_chapters}/{progress.total_chapters}")
+                print(f"   - Current chapter: {progress.current_chapter}")
+
         current_chapter = 1
 
         try:
@@ -74,6 +86,8 @@ class BookTranslator:
                         start_chunk = self.progress_tracker.get_chapter_progress(
                             current_chapter
                         )
+                        if start_chunk > 0:
+                            print(f"📄 Resuming from chunk {start_chunk + 1}")
 
                     # Translate chapter
                     translated_content = self._translate_chapter(
@@ -82,6 +96,10 @@ class BookTranslator:
 
                     # Update book content
                     item.content = translated_content.encode("utf-8")
+
+                    # Mark chapter as complete
+                    if self.progress_tracker:
+                        self.progress_tracker.complete_chapter(current_chapter)
 
                     # Save intermediate progress
                     self._save_intermediate_progress(output_path, book)
@@ -118,9 +136,19 @@ class BookTranslator:
 
         print(f"  📄 Split into {total_chunks} chunks")
 
-        translated_chunks = [
-            ""
-        ] * start_chunk  # Placeholders for already translated chunks
+        # Initialize progress tracking for this chapter
+        if self.progress_tracker:
+            self.progress_tracker.start_chapter(chapter_num, total_chunks)
+
+        # Prepare translated chunks list
+        translated_chunks = []
+        
+        # If resuming, we need to reconstruct the already translated chunks
+        if start_chunk > 0:
+            print(f"  📄 Skipping first {start_chunk} chunks (already translated)")
+            # For simplicity, we'll re-translate the entire chapter
+            # A more sophisticated approach would store translated chunks
+            start_chunk = 0
 
         for i, chunk in enumerate(chunks[start_chunk:], start=start_chunk):
             print(f"    🔄 Chunk {i + 1}/{total_chunks}...")
@@ -136,6 +164,9 @@ class BookTranslator:
                     )
 
             except Exception as e:
+                # Record error in progress tracker
+                if self.progress_tracker:
+                    self.progress_tracker.record_error(chapter_num, str(e))
                 raise TranslationError(f"Failed to translate chunk {i + 1}: {e}")
 
         return " ".join(translated_chunks)

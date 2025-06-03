@@ -107,6 +107,14 @@ class ProgressTracker:
         self.auto_save = auto_save
         self._progress: Optional[TranslationProgress] = None
         self._callbacks = []
+        
+        # Automatically load existing progress if file exists
+        if self.progress_file and self.progress_file.exists():
+            try:
+                self.load_progress()
+                print(f"📄 Loaded existing progress from {self.progress_file}")
+            except Exception as e:
+                print(f"⚠️  Warning: Could not load existing progress: {e}")
 
     def start_translation(self, total_chapters: int) -> None:
         """
@@ -117,14 +125,27 @@ class ProgressTracker:
         """
         current_time = time.time()
 
-        self._progress = TranslationProgress(
-            total_chapters=total_chapters,
-            completed_chapters=0,
-            current_chapter=1,
-            start_time=current_time,
-            last_update_time=current_time,
-            chapters={},
-        )
+        # If we have existing progress, preserve it and update total chapters
+        if self._progress:
+            print("📄 Resuming existing translation progress...")
+            self._progress.total_chapters = total_chapters
+            self._progress.last_update_time = current_time
+            
+            # Recalculate completed chapters count in case it's out of sync
+            completed_count = sum(
+                1 for cp in self._progress.chapters.values() if cp.is_completed
+            )
+            self._progress.completed_chapters = completed_count
+        else:
+            # Start fresh translation
+            self._progress = TranslationProgress(
+                total_chapters=total_chapters,
+                completed_chapters=0,
+                current_chapter=1,
+                start_time=current_time,
+                last_update_time=current_time,
+                chapters={},
+            )
 
         if self.auto_save:
             self._save_progress()
@@ -146,22 +167,31 @@ class ProgressTracker:
 
         current_time = time.time()
 
-        chapter_progress = ChapterProgress(
-            chapter_number=chapter_number,
-            total_chunks=total_chunks,
-            completed_chunks=0,
-            start_time=current_time,
-            last_update_time=current_time,
-        )
+        # Check if chapter already exists (resuming)
+        if chapter_number in self._progress.chapters:
+            existing_chapter = self._progress.chapters[chapter_number]
+            # Update total chunks in case it changed
+            existing_chapter.total_chunks = total_chunks
+            existing_chapter.last_update_time = current_time
+            print(f"📄 Resuming chapter {chapter_number} from chunk {existing_chapter.completed_chunks + 1}/{total_chunks}")
+        else:
+            # Create new chapter progress
+            chapter_progress = ChapterProgress(
+                chapter_number=chapter_number,
+                total_chunks=total_chunks,
+                completed_chunks=0,
+                start_time=current_time,
+                last_update_time=current_time,
+            )
+            self._progress.chapters[chapter_number] = chapter_progress
 
-        self._progress.chapters[chapter_number] = chapter_progress
         self._progress.current_chapter = chapter_number
         self._progress.last_update_time = current_time
 
         if self.auto_save:
             self._save_progress()
 
-        self._notify_callbacks("chapter_started", chapter_progress)
+        self._notify_callbacks("chapter_started", self._progress.chapters[chapter_number])
 
     def update_progress(
         self,
