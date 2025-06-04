@@ -1,9 +1,10 @@
 """
-Enhanced translation logic with multiple output format support.
+Enhanced translation logic with multiple output format support and proper chapter preservation.
 """
 
 import time
 import re
+import json
 from pathlib import Path
 from typing import Optional, List, Set
 from enum import Enum
@@ -54,6 +55,12 @@ class BookTranslator:
 
         # Store translated chapters for multi-format output
         self.translated_chapters = []
+        
+        # Cache file for storing completed chapter data
+        self.chapters_cache_file = None
+        if progress_file:
+            cache_path = Path(progress_file).with_suffix('.chapters.json')
+            self.chapters_cache_file = cache_path
 
     def _parse_output_formats(self, formats: List[str]) -> Set[OutputFormat]:
         """Parse and validate output formats."""
@@ -70,6 +77,57 @@ class BookTranslator:
             valid_formats.add(OutputFormat.MARKDOWN)  # Default fallback
 
         return valid_formats
+
+    def _save_chapter_cache(self):
+        """Save completed chapters to cache file."""
+        if not self.chapters_cache_file:
+            return
+            
+        try:
+            # Prepare serializable data
+            cache_data = []
+            for chapter in self.translated_chapters:
+                cache_data.append({
+                    'number': chapter['number'],
+                    'title': chapter['title'],
+                    'content': chapter['content'],
+                    # Don't save original_item as it's not serializable
+                })
+            
+            with open(self.chapters_cache_file, 'w', encoding='utf-8') as f:
+                json.dump(cache_data, f, indent=2, ensure_ascii=False)
+                
+        except Exception as e:
+            print(f"⚠️  Warning: Could not save chapter cache: {e}")
+
+    def _load_chapter_cache(self):
+        """Load completed chapters from cache file."""
+        if not self.chapters_cache_file or not self.chapters_cache_file.exists():
+            return
+            
+        try:
+            with open(self.chapters_cache_file, 'r', encoding='utf-8') as f:
+                cache_data = json.load(f)
+            
+            # Convert back to chapter format
+            cached_chapters = []
+            for chapter_data in cache_data:
+                cached_chapters.append({
+                    'number': chapter_data['number'],
+                    'title': chapter_data['title'],
+                    'content': chapter_data['content'],
+                    'original_item': None  # Will be None for cached chapters
+                })
+            
+            # Sort by chapter number
+            cached_chapters.sort(key=lambda x: x['number'])
+            self.translated_chapters = cached_chapters
+            
+            print(f"📄 Loaded {len(cached_chapters)} completed chapters from cache")
+            
+        except Exception as e:
+            print(f"⚠️  Warning: Could not load chapter cache: {e}")
+            self.translated_chapters = []
 
     def translate_book(
         self,
@@ -114,8 +172,10 @@ class BookTranslator:
                 )
                 print(f"   - Current chapter: {progress.current_chapter}")
 
+        # Load previously completed chapters from cache
+        self._load_chapter_cache()
+
         current_chapter = 1
-        self.translated_chapters = []  # Reset for new translation
 
         try:
             for item in chapters:
@@ -132,6 +192,20 @@ class BookTranslator:
                         print(
                             f"✅ Chapter {current_chapter} already completed, skipping..."
                         )
+                        
+                        # Ensure the chapter is in our translated_chapters list
+                        if not any(ch['number'] == current_chapter for ch in self.translated_chapters):
+                            # This shouldn't happen if cache is working, but as a fallback
+                            # we can try to reconstruct from the original if needed
+                            chapter_title = self._extract_chapter_title(item, current_chapter)
+                            print(f"⚠️  Chapter {current_chapter} was completed but not in cache, adding placeholder")
+                            self.translated_chapters.append({
+                                'number': current_chapter,
+                                'title': chapter_title,
+                                'content': '[Previously translated content not available in cache]',
+                                'original_item': item
+                            })
+                        
                         current_chapter += 1
                         continue
 
@@ -156,11 +230,27 @@ class BookTranslator:
                         "content": translated_content,
                         "original_item": item,
                     }
-                    self.translated_chapters.append(chapter_data)
+                    
+                    # Add or update chapter in our list
+                    existing_chapter_idx = None
+                    for i, ch in enumerate(self.translated_chapters):
+                        if ch['number'] == current_chapter:
+                            existing_chapter_idx = i
+                            break
+                    
+                    if existing_chapter_idx is not None:
+                        self.translated_chapters[existing_chapter_idx] = chapter_data
+                    else:
+                        self.translated_chapters.append(chapter_data)
+                        # Keep list sorted by chapter number
+                        self.translated_chapters.sort(key=lambda x: x['number'])
 
                     # Mark chapter as complete
                     if self.progress_tracker:
                         self.progress_tracker.complete_chapter(current_chapter)
+
+                    # Save chapter cache after each completed chapter
+                    self._save_chapter_cache()
 
                     print(f"✅ Chapter {current_chapter} completed")
 
@@ -179,6 +269,11 @@ class BookTranslator:
     ):
         """Generate all requested output formats."""
         base_path = Path(output_path).with_suffix("")
+
+        # Ensure we have all chapters sorted by number
+        self.translated_chapters.sort(key=lambda x: x['number'])
+        
+        print(f"📄 Generating outputs with {len(self.translated_chapters)} chapters")
 
         for format_type in self.output_formats:
             try:
