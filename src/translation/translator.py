@@ -344,64 +344,280 @@ class BookTranslator:
         )
 
     def _generate_pdf(self, output_path: Path, from_lang: str, to_lang: str):
-        """Generate PDF output using markdown as intermediate format."""
+        """Generate PDF output using reportlab (pure Python)."""
         try:
-            import markdown
-            from weasyprint import HTML, CSS
-            from weasyprint.text.fonts import FontConfiguration
+            from reportlab.lib.pagesizes import A4
+            from reportlab.platypus import (
+                SimpleDocTemplate,
+                Paragraph,
+                Spacer,
+                PageBreak,
+            )
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.lib.colors import HexColor
+            from reportlab.lib.enums import TA_JUSTIFY, TA_CENTER
+            import textwrap
         except ImportError:
-            print("⚠️  PDF generation requires 'markdown' and 'weasyprint' packages")
-            print("   Install with: pip install markdown weasyprint")
+            print("⚠️  PDF generation requires 'reportlab' package")
+            print("   Install with: pip install reportlab")
             return
 
-        # Create HTML from markdown content
-        md_content = self._create_markdown_content(from_lang, to_lang)
-        html_content = markdown.markdown(md_content)
+        try:
+            # Register Unicode-compatible fonts
+            self._register_unicode_fonts()
 
-        # Add CSS styling
-        css_style = """
-        @page {
-            margin: 2cm;
-            size: A4;
-        }
-        body {
-            font-family: serif;
-            line-height: 1.6;
-            color: #333;
-            max-width: none;
-        }
-        h1 {
-            color: #2c3e50;
-            border-bottom: 3px solid #3498db;
-            padding-bottom: 10px;
-        }
-        h2 {
-            color: #34495e;
-            margin-top: 2em;
-            margin-bottom: 1em;
-            page-break-before: always;
-        }
-        p {
-            text-align: justify;
-            margin-bottom: 1em;
-        }
-        hr {
-            border: none;
-            height: 1px;
-            background-color: #bdc3c7;
-            margin: 2em 0;
-        }
-        """
+            # Create PDF document
+            doc = SimpleDocTemplate(
+                str(output_path),
+                pagesize=A4,
+                rightMargin=72,
+                leftMargin=72,
+                topMargin=72,
+                bottomMargin=72,
+            )
 
-        # Generate PDF
-        font_config = FontConfiguration()
-        html_doc = HTML(string=html_content, base_url=str(output_path.parent))
-        css_doc = CSS(string=css_style, font_config=font_config)
+            # Get styles
+            styles = getSampleStyleSheet()
 
-        html_doc.write_pdf(
-            str(output_path), stylesheets=[css_doc], font_config=font_config
-        )
-        print(f"📖 PDF saved to: {output_path}")
+            # Create custom styles with Unicode font
+            unicode_font = self._get_unicode_font_name()
+
+            title_style = ParagraphStyle(
+                "CustomTitle",
+                parent=styles["Title"],
+                fontSize=24,
+                spaceAfter=30,
+                alignment=TA_CENTER,
+                textColor=HexColor("#2c3e50"),
+                fontName=unicode_font,
+            )
+
+            chapter_title_style = ParagraphStyle(
+                "ChapterTitle",
+                parent=styles["Heading1"],
+                fontSize=18,
+                spaceAfter=20,
+                spaceBefore=30,
+                textColor=HexColor("#34495e"),
+                keepWithNext=1,  # Keep chapter title with following paragraph
+                fontName=unicode_font,
+            )
+
+            body_style = ParagraphStyle(
+                "CustomBody",
+                parent=styles["Normal"],
+                fontSize=11,
+                leading=16,
+                alignment=TA_JUSTIFY,
+                spaceAfter=12,
+                firstLineIndent=20,
+                fontName=unicode_font,
+            )
+
+            subtitle_style = ParagraphStyle(
+                "Subtitle",
+                parent=styles["Normal"],
+                fontSize=10,
+                alignment=TA_CENTER,
+                textColor=HexColor("#7f8c8d"),
+                spaceAfter=20,
+                fontName=unicode_font,
+            )
+
+            # Build story (content list)
+            story = []
+
+            # Add title
+            story.append(
+                Paragraph(f"Translated Book ({from_lang} → {to_lang})", title_style)
+            )
+            story.append(Spacer(1, 12))
+
+            # Add subtitle with timestamp
+            import time
+
+            story.append(
+                Paragraph(
+                    f"Translation generated on {time.strftime('%B %d, %Y at %H:%M')}",
+                    subtitle_style,
+                )
+            )
+            story.append(Spacer(1, 30))
+
+            # Add chapters
+            for i, chapter in enumerate(self.translated_chapters):
+                if not chapter["content"].strip():
+                    continue
+
+                # Add page break for new chapters (except first)
+                if i > 0:
+                    story.append(PageBreak())
+
+                # Add chapter title
+                story.append(
+                    Paragraph(self._escape_html(chapter["title"]), chapter_title_style)
+                )
+
+                # Process chapter content
+                content = chapter["content"].strip()
+
+                # Split content into paragraphs
+                paragraphs = [p.strip() for p in content.split("\n\n") if p.strip()]
+
+                for paragraph in paragraphs:
+                    if paragraph:
+                        # Handle long paragraphs by splitting them
+                        if len(paragraph) > 1000:
+                            # Split very long paragraphs into smaller chunks
+                            wrapped_lines = textwrap.wrap(paragraph, width=80)
+                            current_chunk = []
+
+                            for line in wrapped_lines:
+                                current_chunk.append(line)
+                                if len(" ".join(current_chunk)) > 800:
+                                    story.append(
+                                        Paragraph(
+                                            self._escape_html(" ".join(current_chunk)),
+                                            body_style,
+                                        )
+                                    )
+                                    current_chunk = []
+
+                            # Add remaining content
+                            if current_chunk:
+                                story.append(
+                                    Paragraph(
+                                        self._escape_html(" ".join(current_chunk)),
+                                        body_style,
+                                    )
+                                )
+                        else:
+                            # Ensure proper Unicode handling
+                            clean_paragraph = self._clean_unicode_text(paragraph)
+                            story.append(
+                                Paragraph(
+                                    self._escape_html(clean_paragraph), body_style
+                                )
+                            )
+
+                # Add spacing after chapter
+                story.append(Spacer(1, 20))
+
+            # Add footer
+            story.append(PageBreak())
+            story.append(Spacer(1, 200))
+            story.append(
+                Paragraph(
+                    f"Translation completed on {time.strftime('%B %d, %Y at %H:%M')}",
+                    subtitle_style,
+                )
+            )
+
+            # Build PDF
+            doc.build(story)
+            print(f"📖 PDF saved to: {output_path}")
+
+        except Exception as e:
+            raise TranslationError(f"Failed to generate PDF: {e}")
+
+    def _clean_unicode_text(self, text: str) -> str:
+        """Clean and normalize Unicode text for PDF generation."""
+        import unicodedata
+
+        # Normalize Unicode characters (NFKC normalization)
+        normalized = unicodedata.normalize("NFKC", text)
+
+        # Ensure the text is properly encoded
+        try:
+            # Test if the text can be encoded/decoded properly
+            normalized.encode("utf-8").decode("utf-8")
+            return normalized
+        except UnicodeError:
+            # If there are encoding issues, try to fix them
+            return normalized.encode("utf-8", errors="replace").decode("utf-8")
+
+    def _register_unicode_fonts(self):
+        """Register Unicode-compatible fonts for proper character rendering."""
+        try:
+            from reportlab.pdfbase import pdfmetrics
+            from reportlab.pdfbase.ttfonts import TTFont
+            import os
+            import platform
+
+            # Common Unicode font paths by OS
+            font_paths = []
+            system = platform.system().lower()
+
+            if system == "windows":
+                font_paths = [
+                    "C:/Windows/Fonts/arial.ttf",
+                    "C:/Windows/Fonts/calibri.ttf",
+                    "C:/Windows/Fonts/times.ttf",
+                    "C:/Windows/Fonts/DejaVuSans.ttf",
+                ]
+            elif system == "darwin":  # macOS
+                font_paths = [
+                    "/System/Library/Fonts/Arial.ttf",
+                    "/System/Library/Fonts/Times.ttc",
+                    "/System/Library/Fonts/Helvetica.ttc",
+                    "/opt/homebrew/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                    "/usr/local/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                ]
+            else:  # Linux
+                font_paths = [
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+                    "/usr/share/fonts/TTF/DejaVuSans.ttf",
+                    "/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf",
+                    "/usr/share/fonts/opentype/noto/NotoSans-Regular.ttf",
+                ]
+
+            # Try to register the first available font
+            font_registered = False
+            for font_path in font_paths:
+                if os.path.exists(font_path):
+                    try:
+                        pdfmetrics.registerFont(TTFont("UnicodeFont", font_path))
+                        font_registered = True
+                        print(f"📝 Using Unicode font: {os.path.basename(font_path)}")
+                        break
+                    except Exception:
+                        continue
+
+            if not font_registered:
+                print("⚠️  No Unicode font found, falling back to built-in fonts")
+                print("   Some characters may not display correctly")
+
+        except Exception as e:
+            print(f"⚠️  Font registration failed: {e}")
+
+    def _get_unicode_font_name(self):
+        """Get the name of the registered Unicode font."""
+        try:
+            from reportlab.pdfbase import pdfmetrics
+
+            # Check if our Unicode font was registered
+            if "UnicodeFont" in pdfmetrics.getRegisteredFontNames():
+                return "UnicodeFont"
+        except Exception:
+            pass
+
+        # Fall back to Helvetica which has better Unicode support than Times-Roman
+        return "Helvetica"
+
+    def _escape_html(self, text: str) -> str:
+        """Escape HTML characters for reportlab."""
+        import html
+
+        # First escape HTML entities
+        escaped = html.escape(text)
+
+        # Handle reportlab-specific escaping
+        escaped = escaped.replace("&", "&amp;")
+        escaped = escaped.replace("<", "&lt;")
+        escaped = escaped.replace(">", "&gt;")
+
+        return escaped
 
     def _create_markdown_content(self, from_lang: str, to_lang: str) -> str:
         """Create markdown content from translated chapters."""
