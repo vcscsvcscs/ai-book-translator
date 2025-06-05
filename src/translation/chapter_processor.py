@@ -49,12 +49,39 @@ class ChapterProcessor:
         text = soup.get_text(separator="\n\n", strip=True)
         return re.sub(r"\s+", " ", text).strip()
 
+    def _create_translation_prompt(
+        self, text: str, from_lang: str, to_lang: str
+    ) -> str:
+        """Create translation prompt."""
+        return (
+            f"You are a professional {from_lang}-to-{to_lang} translator. "
+            f"Translate the following text naturally and fluently to {to_lang}. "
+            f"{self.extra_prompts}. "
+            f"Maintain readability and consistency with the source text while making it read naturally in {to_lang}. "
+            f"Do not add explanations, comments, or notes - only provide the translation.\n\n"
+            f"Text to translate:\n{text}"
+        )
+
     def _translate_chunk(self, text, from_lang, to_lang):
         """Translate a single chunk."""
-        prompt = f"Translate the following text from {from_lang} to {to_lang}:\n{text}"
+        prompt = self._create_translation_prompt(text, from_lang, to_lang)
         for _ in range(self.max_retries):
             try:
                 return self.llm.complete(prompt).text.strip()
             except Exception as e:
                 print(f"⚠️ Error: {e}")
         raise TranslationError("Failed to translate chunk.")
+    
+    def _extract_chapter_title(self, item, chapter_num: int) -> str:
+        """Extract chapter title from EPUB item."""
+        try:
+            soup = BeautifulSoup(item.content, "html.parser")
+            title_elem = soup.find(["h1", "h2", "h3", "title"])
+            if title_elem:
+                title = title_elem.get_text(strip=True)
+                if title and len(title) < 100:  # Reasonable title length
+                    return title
+        except Exception:
+            pass
+
+        return f"{chapter_num}"

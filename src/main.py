@@ -78,7 +78,7 @@ Examples:
     translate_parser.add_argument(
         "--chunk-size",
         type=int,
-        default=20000,
+        default=4000,
         help="Maximum chunk size for translation",
     )
     translate_parser.add_argument(

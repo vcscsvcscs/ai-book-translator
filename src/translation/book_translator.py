@@ -3,21 +3,14 @@ Handles book translation logic.
 """
 
 from typing import Optional, List, Set
-from enum import Enum
 
+import ebooklib
 from ebooklib import epub
 from .chapter_processor import ChapterProcessor
-from .output_generator import OutputGenerator
+from .output_generator import OutputGenerator, OutputFormat
 from .progress import ProgressTracker
 from utils.exceptions import TranslationError
 
-
-class OutputFormat(Enum):
-    """Supported output formats."""
-
-    EPUB = "epub"
-    PDF = "pdf"
-    MARKDOWN = "markdown"
 
 
 class BookTranslator:
@@ -123,7 +116,9 @@ class BookTranslator:
                     self.translated_chapters.append(chapter_data)
 
                     print(f"✅ Chapter {current_chapter} completed")
-
+                elif to_chapter < current_chapter:
+                    break
+                
                 current_chapter += 1
 
             # Generate all requested output formats
@@ -138,5 +133,5 @@ class BookTranslator:
     def _get_document_items(self, book):
         """Get all document items from the book."""
         return [
-            item for item in book.get_items() if item.get_type() == epub.ITEM_DOCUMENT
+            item for item in book.get_items() if item.get_type() == ebooklib.ITEM_DOCUMENT
         ]
