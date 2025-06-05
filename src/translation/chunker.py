@@ -3,6 +3,7 @@ Text chunking logic for breaking down large texts into manageable pieces.
 """
 
 import re
+import logging
 from typing import List
 from dataclasses import dataclass
 
