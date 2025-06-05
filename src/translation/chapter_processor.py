@@ -11,7 +11,9 @@ from utils.exceptions import TranslationError
 class ChapterProcessor:
     """Processes individual chapters for translation."""
 
-    def __init__(self, llm, chunk_size, max_retries, retry_delay, extra_prompts, progress_tracker):
+    def __init__(
+        self, llm, chunk_size, max_retries, retry_delay, extra_prompts, progress_tracker
+    ):
         self.llm = llm
         self.chunker = TextChunker(chunk_size)
         self.max_retries = max_retries
@@ -49,9 +51,7 @@ class ChapterProcessor:
 
     def _translate_chunk(self, text, from_lang, to_lang):
         """Translate a single chunk."""
-        prompt = (
-            f"Translate the following text from {from_lang} to {to_lang}:\n{text}"
-        )
+        prompt = f"Translate the following text from {from_lang} to {to_lang}:\n{text}"
         for _ in range(self.max_retries):
             try:
                 return self.llm.complete(prompt).text.strip()

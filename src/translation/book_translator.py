@@ -2,7 +2,6 @@
 Handles book translation logic.
 """
 
-from pathlib import Path
 from typing import Optional, List, Set
 from enum import Enum
 
@@ -51,7 +50,12 @@ class BookTranslator:
 
         # Initialize helper components
         self.chapter_processor = ChapterProcessor(
-            llm, chunk_size, max_retries, retry_delay, extra_prompts, self.progress_tracker
+            llm,
+            chunk_size,
+            max_retries,
+            retry_delay,
+            extra_prompts,
+            self.progress_tracker,
         )
         self.output_generator = OutputGenerator(self.translated_chapters)
 
@@ -134,7 +138,5 @@ class BookTranslator:
     def _get_document_items(self, book):
         """Get all document items from the book."""
         return [
-            item
-            for item in book.get_items()
-            if item.get_type() == epub.ITEM_DOCUMENT
+            item for item in book.get_items() if item.get_type() == epub.ITEM_DOCUMENT
         ]
