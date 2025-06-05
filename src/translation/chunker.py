@@ -27,8 +27,8 @@ class TextChunker:
 
     def __init__(
         self,
-        max_chunk_size: int = 20000,
-        overlap_size: int = 200,
+        max_chunk_size: int = 4000,  # Optimized for GPT-4o (approx. 1000 tokens)
+        overlap_size: int = 300,    # Ensure sufficient context overlap
         preserve_html: bool = True,
         min_chunk_size: int = 1000,
     ):
@@ -163,8 +163,10 @@ class TextChunker:
         if current_chunk.strip():
             chunks.append(current_chunk.strip())
 
-        self.logger.debug(f"Created {len(chunks)} chunks. Chunk sizes: {[len(chunk) for chunk in chunks]}")
-        self.logger.debug(f"Final chunks: {chunks}")
+        self.logger.debug(f"Created {len(chunks)} chunks.")
+        self.logger.debug(f"Chunk sizes: {[len(chunk) for chunk in chunks]}")
+        for i, chunk in enumerate(chunks):
+            self.logger.debug(f"Chunk {i + 1}: {chunk[:100]}...")  # Log first 100 characters of each chunk
         return chunks
 
     def _split_sentences_preserve_html(self, html_text: str) -> List[str]:
