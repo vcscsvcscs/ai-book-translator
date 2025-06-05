@@ -53,7 +53,12 @@ class TextChunker:
         Returns:
             List of text chunks
         """
+        import logging
+        logging.basicConfig(level=logging.DEBUG)
+        logger = logging.getLogger(__name__)
+
         if not text or not text.strip():
+            logger.debug("Input text is empty or whitespace only.")
             return []
 
         # Choose strategy based on content
@@ -104,6 +109,7 @@ class TextChunker:
         sentences = self._split_sentences_preserve_html(html_text)
 
         chunks = []
+        logger.debug(f"Splitting text into chunks. Text length: {len(text)}")
         current_chunk = ""
 
         for sentence in sentences:
@@ -136,6 +142,7 @@ class TextChunker:
             List of text chunks
         """
         sentences = self._split_sentences(text)
+        logger.debug(f"Split text into {len(sentences)} sentences.")
 
         chunks = []
         current_chunk = ""
@@ -153,6 +160,8 @@ class TextChunker:
         if current_chunk.strip():
             chunks.append(current_chunk.strip())
 
+        logger.debug(f"Created {len(chunks)} chunks. Chunk sizes: {[len(chunk) for chunk in chunks]}")
+        logger.debug(f"Final chunks: {chunks}")
         return chunks
 
     def _split_sentences_preserve_html(self, html_text: str) -> List[str]:
@@ -201,7 +210,8 @@ class TextChunker:
             return text
 
         # Try to find a good breaking point (end of sentence)
-        overlap_candidate = text[-self.overlap_size :]
+        overlap_candidate = text[-self.overlap_size:]
+        logger.debug(f"Overlap candidate: {overlap_candidate}")
         sentence_end = overlap_candidate.rfind(".")
 
         if sentence_end > self.overlap_size // 2:
