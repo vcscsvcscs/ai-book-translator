@@ -22,6 +22,8 @@ class ChunkMetadata:
 class TextChunker:
     """Handles text chunking with various strategies."""
 
+    logger = logging.getLogger(__name__)
+
     def __init__(
         self,
         max_chunk_size: int = 20000,
@@ -109,7 +111,7 @@ class TextChunker:
         sentences = self._split_sentences_preserve_html(html_text)
 
         chunks = []
-        logger.debug(f"Splitting text into chunks. Text length: {len(text)}")
+        self.logger.debug(f"Splitting text into chunks. Text length: {len(html_text)}")
         current_chunk = ""
 
         for sentence in sentences:
@@ -142,7 +144,7 @@ class TextChunker:
             List of text chunks
         """
         sentences = self._split_sentences(text)
-        logger.debug(f"Split text into {len(sentences)} sentences.")
+        self.logger.debug(f"Split text into {len(sentences)} sentences.")
 
         chunks = []
         current_chunk = ""
@@ -160,8 +162,8 @@ class TextChunker:
         if current_chunk.strip():
             chunks.append(current_chunk.strip())
 
-        logger.debug(f"Created {len(chunks)} chunks. Chunk sizes: {[len(chunk) for chunk in chunks]}")
-        logger.debug(f"Final chunks: {chunks}")
+        self.logger.debug(f"Created {len(chunks)} chunks. Chunk sizes: {[len(chunk) for chunk in chunks]}")
+        self.logger.debug(f"Final chunks: {chunks}")
         return chunks
 
     def _split_sentences_preserve_html(self, html_text: str) -> List[str]:
@@ -211,7 +213,7 @@ class TextChunker:
 
         # Try to find a good breaking point (end of sentence)
         overlap_candidate = text[-self.overlap_size:]
-        logger.debug(f"Overlap candidate: {overlap_candidate}")
+        self.logger.debug(f"Overlap candidate: {overlap_candidate}")
         sentence_end = overlap_candidate.rfind(".")
 
         if sentence_end > self.overlap_size // 2:
