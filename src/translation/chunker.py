@@ -1,152 +1,180 @@
 """
-Text chunking logic for breaking down large texts into manageable pieces.
+Improved text chunking and translation logic for ebooks.
 """
 
 import re
 from typing import List
 from dataclasses import dataclass
+from bs4 import BeautifulSoup
 
 
 @dataclass
 class ChunkMetadata:
-    """Metadata for a text chunk."""
+    """Enhanced metadata for a text chunk."""
 
     index: int
     character_count: int
-    sentence_count: int
+    word_count: int
+    paragraph_count: int
     has_html: bool
     start_position: int
     end_position: int
+    is_dialogue: bool
+    chapter_section: str  # beginning, middle, end
 
 
 class TextChunker:
-    """Handles text chunking with various strategies."""
+    """Enhanced text chunker with better book-aware splitting."""
 
     def __init__(
         self,
-        max_chunk_size: int = 20000,
-        overlap_size: int = 200,
+        max_chunk_size: int = 8000,  # Reduced for better GPT-4 handling
+        overlap_size: int = 300,  # Increased overlap for better context
         preserve_html: bool = True,
-        min_chunk_size: int = 1000,
+        min_chunk_size: int = 500,
     ):
-        """
-        Initialize the text chunker.
-
-        Args:
-            max_chunk_size: Maximum size of each chunk in characters
-            overlap_size: Number of characters to overlap between chunks
-            preserve_html: Whether to preserve HTML structure when chunking
-            min_chunk_size: Minimum size of a chunk (prevents very small chunks)
-        """
         self.max_chunk_size = max_chunk_size
         self.overlap_size = overlap_size
         self.preserve_html = preserve_html
         self.min_chunk_size = min_chunk_size
 
+        # Enhanced sentence splitting patterns
+        self.sentence_endings = re.compile(
+            r'(?<=[.!?])\s+(?=[A-Z"\'\'])|'  # Standard sentence endings
+            r'(?<=[.!?])\s*\n\s*(?=[A-Z"\'\'])|'  # Sentence endings with newlines
+            r'(?<=\.)\s*\n\s*\n\s*(?=[A-Z"\'\'])'  # Paragraph breaks
+        )
+
+        # Dialogue patterns for better splitting
+        self.dialogue_patterns = re.compile(r'(["\']{1,3}).*?\1')
+
     def split_text(self, text: str) -> List[str]:
-        """
-        Split text into chunks using the most appropriate strategy.
-
-        Args:
-            text: The text to split
-
-        Returns:
-            List of text chunks
-        """
+        """Enhanced text splitting with book-aware logic."""
         if not text or not text.strip():
             return []
 
-        # Choose strategy based on content
+        # Detect if this is HTML content
         if self.preserve_html and self._has_html_content(text):
-            return self._split_html_by_sentences(text)
+            return self._split_html_intelligently(text)
         else:
-            return self._split_by_sentences(text)
+            return self._split_text_intelligently(text)
 
-    def split_with_metadata(self, text: str) -> List[tuple[str, ChunkMetadata]]:
-        """
-        Split text into chunks and return with metadata.
+    def _split_html_intelligently(self, html_text: str) -> List[str]:
+        """Split HTML text with awareness of book structure."""
+        # Parse HTML to extract clean text while preserving structure
+        soup = BeautifulSoup(html_text, "html.parser")
 
-        Args:
-            text: The text to split
+        # Get paragraphs and major structural elements
+        elements = soup.find_all(["p", "div", "h1", "h2", "h3", "h4", "h5", "h6"])
 
-        Returns:
-            List of tuples containing (chunk_text, metadata)
-        """
-        chunks = self.split_text(text)
-        result = []
-        current_position = 0
+        chunks = []
+        current_chunk = ""
+        current_html_chunk = ""
 
-        for i, chunk in enumerate(chunks):
-            metadata = ChunkMetadata(
-                index=i,
-                character_count=len(chunk),
-                sentence_count=self._count_sentences(chunk),
-                has_html=self._has_html_content(chunk),
-                start_position=current_position,
-                end_position=current_position + len(chunk),
-            )
-            result.append((chunk, metadata))
-            current_position += len(chunk) - self.overlap_size
+        for element in elements:
+            element_text = element.get_text(strip=True)
+            element_html = str(element)
 
-        return result
+            # Check if adding this element would exceed chunk size
+            if len(current_chunk) + len(element_text) > self.max_chunk_size:
+                if current_chunk and len(current_chunk) >= self.min_chunk_size:
+                    chunks.append(current_html_chunk.strip())
 
-    def _split_html_by_sentences(self, html_text: str) -> List[str]:
-        """
-        Split HTML text by sentences while preserving HTML structure.
+                    # Start new chunk with intelligent overlap
+                    overlap_html = self._get_html_overlap(current_html_chunk)
+                    current_html_chunk = overlap_html + element_html
+                    current_chunk = self._extract_text_from_html(current_html_chunk)
+                else:
+                    # Current chunk too small, continue building
+                    current_html_chunk += "\n" + element_html
+                    current_chunk += " " + element_text
+            else:
+                current_html_chunk += (
+                    "\n" + element_html if current_html_chunk else element_html
+                )
+                current_chunk += " " + element_text if current_chunk else element_text
 
-        Args:
-            html_text: HTML text to split
+        # Add final chunk
+        if current_html_chunk.strip():
+            chunks.append(current_html_chunk.strip())
 
-        Returns:
-            List of HTML chunks
-        """
-        # Split by sentence endings, but be careful with HTML tags
-        sentences = self._split_sentences_preserve_html(html_text)
+        return self._validate_and_clean_chunks(chunks)
+
+    def _split_text_intelligently(self, text: str) -> List[str]:
+        """Split plain text with book-aware intelligence."""
+        # First, split into paragraphs
+        paragraphs = re.split(r"\n\s*\n", text)
 
         chunks = []
         current_chunk = ""
 
-        for sentence in sentences:
-            # Check if adding this sentence would exceed the limit
-            if len(current_chunk) + len(sentence) > self.max_chunk_size:
+        for paragraph in paragraphs:
+            paragraph = paragraph.strip()
+            if not paragraph:
+                continue
+
+            # If this paragraph alone is too big, split it by sentences
+            if len(paragraph) > self.max_chunk_size:
+                # Split the large paragraph by sentences
+                para_chunks = self._split_large_paragraph(paragraph)
+
+                # Add completed current chunk if exists
                 if current_chunk and len(current_chunk) >= self.min_chunk_size:
                     chunks.append(current_chunk.strip())
-                    # Start new chunk with overlap if possible
-                    current_chunk = self._get_overlap_text(current_chunk) + sentence
-                else:
-                    # Current chunk is too small, continue building
-                    current_chunk += " " + sentence if current_chunk else sentence
-            else:
-                current_chunk += " " + sentence if current_chunk else sentence
+                    current_chunk = ""
 
-        # Add the final chunk
+                # Add paragraph chunks (except maybe the last one)
+                for i, para_chunk in enumerate(para_chunks):
+                    if i == len(para_chunks) - 1:
+                        # Last chunk - might combine with next content
+                        current_chunk = para_chunk
+                    else:
+                        chunks.append(para_chunk)
+
+            # Check if adding this paragraph exceeds limit
+            elif (
+                len(current_chunk) + len(paragraph) + 2 > self.max_chunk_size
+            ):  # +2 for \n\n
+                if current_chunk and len(current_chunk) >= self.min_chunk_size:
+                    chunks.append(current_chunk.strip())
+
+                    # Start new chunk with overlap
+                    overlap = self._get_smart_overlap(current_chunk)
+                    current_chunk = (
+                        overlap + "\n\n" + paragraph if overlap else paragraph
+                    )
+                else:
+                    # Current chunk too small, continue
+                    current_chunk += "\n\n" + paragraph if current_chunk else paragraph
+            else:
+                # Add paragraph to current chunk
+                current_chunk += "\n\n" + paragraph if current_chunk else paragraph
+
+        # Add final chunk
         if current_chunk.strip():
             chunks.append(current_chunk.strip())
 
-        return self._clean_chunks(chunks)
+        return self._validate_and_clean_chunks(chunks)
 
-    def _split_by_sentences(self, text: str) -> List[str]:
-        """
-        Split plain text by sentences.
-
-        Args:
-            text: Plain text to split
-
-        Returns:
-            List of text chunks
-        """
-        sentences = self._split_sentences(text)
+    def _split_large_paragraph(self, paragraph: str) -> List[str]:
+        """Split a large paragraph by sentences with smart breaks."""
+        sentences = self._split_into_sentences(paragraph)
 
         chunks = []
         current_chunk = ""
 
         for sentence in sentences:
             if len(current_chunk) + len(sentence) > self.max_chunk_size:
-                if current_chunk and len(current_chunk) >= self.min_chunk_size:
+                if current_chunk:
                     chunks.append(current_chunk.strip())
-                    current_chunk = self._get_overlap_text(current_chunk) + sentence
+                    # Start new chunk with overlap
+                    overlap = self._get_sentence_overlap(current_chunk)
+                    current_chunk = overlap + " " + sentence if overlap else sentence
                 else:
-                    current_chunk += " " + sentence if current_chunk else sentence
+                    # Single sentence is too long - force split by words
+                    word_chunks = self._split_by_words(sentence)
+                    chunks.extend(word_chunks[:-1])
+                    current_chunk = word_chunks[-1] if word_chunks else ""
             else:
                 current_chunk += " " + sentence if current_chunk else sentence
 
@@ -155,148 +183,155 @@ class TextChunker:
 
         return chunks
 
-    def _split_sentences_preserve_html(self, html_text: str) -> List[str]:
-        """
-        Split sentences while preserving HTML tags.
+    def _split_into_sentences(self, text: str) -> List[str]:
+        """Enhanced sentence splitting for books."""
+        # Handle dialogue and quoted speech specially
+        sentences = []
 
-        Args:
-            html_text: HTML text to split
+        # Split by sentence endings but be smart about dialogue
+        parts = self.sentence_endings.split(text)
 
-        Returns:
-            List of sentences with HTML preserved
-        """
-        # More sophisticated sentence splitting that considers HTML
-        # Split on sentence endings but not inside HTML tags
-        pattern = r"(?<=[.!?])\s+(?![^<]*>)"
-        sentences = re.split(pattern, html_text)
+        current_sentence = ""
+        for part in parts:
+            current_sentence += part
 
-        # Clean up empty sentences
-        return [s.strip() for s in sentences if s.strip()]
+            # Check if we have a complete sentence
+            if self._is_complete_sentence(current_sentence):
+                sentences.append(current_sentence.strip())
+                current_sentence = ""
 
-    def _split_sentences(self, text: str) -> List[str]:
-        """
-        Split plain text into sentences.
+        # Add any remaining text
+        if current_sentence.strip():
+            sentences.append(current_sentence.strip())
 
-        Args:
-            text: Plain text to split
+        return [s for s in sentences if s.strip()]
 
-        Returns:
-            List of sentences
-        """
-        # Basic sentence splitting
-        sentences = re.split(r"(?<=[.!?])\s+", text)
-        return [s.strip() for s in sentences if s.strip()]
+    def _is_complete_sentence(self, text: str) -> bool:
+        """Check if text represents a complete sentence."""
+        text = text.strip()
+        if not text:
+            return False
 
-    def _get_overlap_text(self, text: str) -> str:
-        """
-        Get overlap text from the end of a chunk.
+        # Must end with sentence punctuation
+        if not text.endswith((".", "!", "?", '"', "'")):
+            return False
 
-        Args:
-            text: The text to get overlap from
+        # Should not end mid-dialogue
+        quote_count = text.count('"') + text.count('"') + text.count('"')
+        if quote_count % 2 != 0:  # Odd number of quotes = incomplete dialogue
+            return False
 
-        Returns:
-            Overlap text
-        """
+        return True
+
+    def _get_smart_overlap(self, text: str) -> str:
+        """Get intelligent overlap that preserves context."""
         if len(text) <= self.overlap_size:
             return text
 
-        # Try to find a good breaking point (end of sentence)
+        # Try to find the last complete sentence within overlap size
         overlap_candidate = text[-self.overlap_size :]
-        sentence_end = overlap_candidate.rfind(".")
 
-        if sentence_end > self.overlap_size // 2:
-            return overlap_candidate[sentence_end + 1 :].strip()
-        else:
-            return overlap_candidate
+        # Find sentence boundaries
+        sentences = self._split_into_sentences(overlap_candidate)
+        if len(sentences) > 1:
+            # Return last complete sentence(s)
+            return sentences[-1]
+
+        # Fallback: find last paragraph break
+        last_para = overlap_candidate.rfind("\n\n")
+        if last_para > self.overlap_size // 3:
+            return overlap_candidate[last_para + 2 :].strip()
+
+        # Final fallback: word boundary
+        words = overlap_candidate.split()
+        return " ".join(words[-min(30, len(words)) :])  # Last ~30 words
+
+    def _get_sentence_overlap(self, text: str) -> str:
+        """Get overlap at sentence level."""
+        sentences = self._split_into_sentences(text)
+        if not sentences:
+            return ""
+
+        # Return last sentence if it fits in overlap size
+        last_sentence = sentences[-1]
+        if len(last_sentence) <= self.overlap_size:
+            return last_sentence
+
+        # Otherwise return last few words
+        words = last_sentence.split()
+        return " ".join(words[-min(20, len(words)) :])
+
+    def _split_by_words(self, text: str) -> List[str]:
+        """Emergency word-level splitting for very long sentences."""
+        words = text.split()
+        chunks = []
+        current_chunk = ""
+
+        for word in words:
+            if len(current_chunk) + len(word) + 1 > self.max_chunk_size:
+                if current_chunk:
+                    chunks.append(current_chunk.strip())
+                    current_chunk = word
+                else:
+                    # Single word is too long - just add it
+                    chunks.append(word)
+            else:
+                current_chunk += " " + word if current_chunk else word
+
+        if current_chunk:
+            chunks.append(current_chunk.strip())
+
+        return chunks
 
     def _has_html_content(self, text: str) -> bool:
-        """Check if text contains HTML tags."""
-        return bool(re.search(r"<[^>]+>", text))
+        """Enhanced HTML detection."""
+        return bool(re.search(r"<(?:p|div|span|h[1-6]|br|em|strong|i|b)[^>]*>", text))
 
-    def _count_sentences(self, text: str) -> int:
-        """Count sentences in text."""
-        sentences = re.split(r"[.!?]+", text)
-        return len([s for s in sentences if s.strip()])
+    def _extract_text_from_html(self, html: str) -> str:
+        """Extract text from HTML for length calculations."""
+        soup = BeautifulSoup(html, "html.parser")
+        return soup.get_text(strip=True)
 
-    def _clean_chunks(self, chunks: List[str]) -> List[str]:
-        """
-        Clean and validate chunks.
+    def _get_html_overlap(self, html_chunk: str) -> str:
+        """Get overlap from HTML chunk preserving structure."""
+        soup = BeautifulSoup(html_chunk, "html.parser")
+        elements = soup.find_all(["p", "div"])
 
-        Args:
-            chunks: List of chunks to clean
+        if not elements:
+            return ""
 
-        Returns:
-            Cleaned chunks
-        """
-        cleaned = []
+        # Get last element as overlap
+        last_element = elements[-1]
+        return str(last_element)
 
-        for chunk in chunks:
-            chunk = chunk.strip()
+    def _validate_and_clean_chunks(self, chunks: List[str]) -> List[str]:
+        """Validate and clean chunks with better error handling."""
+        cleaned_chunks: List[str] = []
+        buffer = ""
+
+        i = 0
+        while i < len(chunks):
+            chunk = chunks[i].strip()
             if not chunk:
+                i += 1
                 continue
 
-            # Ensure chunk ends properly
-            if self.preserve_html and self._has_html_content(chunk):
-                # For HTML, just ensure it's not empty
-                if chunk:
-                    cleaned.append(chunk)
-            else:
-                # For plain text, ensure proper sentence ending
-                if not chunk.endswith((".", "!", "?")):
-                    chunk += "."
-                cleaned.append(chunk)
+            # If chunk is too small and not the last chunk, combine with the next one
+            if len(chunk) < self.min_chunk_size and i < len(chunks) - 1:
+                buffer += chunk + "\n\n"
+                i += 1
+                continue
 
-        return cleaned
+            # Prepend any buffered content from a previous small chunk
+            if buffer:
+                chunk = buffer + chunk
+                buffer = ""
 
-    def estimate_chunks(self, text: str) -> int:
-        """
-        Estimate the number of chunks that will be created.
+            cleaned_chunks.append(chunk)
+            i += 1
 
-        Args:
-            text: Text to estimate chunks for
+        # Add any remaining buffer as a final chunk if non-empty
+        if buffer:
+            cleaned_chunks.append(buffer.strip())
 
-        Returns:
-            Estimated number of chunks
-        """
-        if not text:
-            return 0
-
-        text_length = len(text)
-        if text_length <= self.max_chunk_size:
-            return 1
-
-        # Account for overlap
-        effective_chunk_size = self.max_chunk_size - self.overlap_size
-        return max(1, (text_length + effective_chunk_size - 1) // effective_chunk_size)
-
-    def validate_chunks(self, chunks: List[str]) -> List[str]:
-        """
-        Validate and report issues with chunks.
-
-        Args:
-            chunks: List of chunks to validate
-
-        Returns:
-            List of validation warnings
-        """
-        warnings = []
-
-        for i, chunk in enumerate(chunks):
-            if len(chunk) > self.max_chunk_size:
-                warnings.append(
-                    f"Chunk {i + 1} exceeds maximum size: {len(chunk)} > {self.max_chunk_size}"
-                )
-
-            if len(chunk) < self.min_chunk_size:
-                warnings.append(
-                    f"Chunk {i + 1} is below minimum size: {len(chunk)} < {self.min_chunk_size}"
-                )
-
-            if self.preserve_html and self._has_html_content(chunk):
-                # Basic HTML validation
-                open_tags = len(re.findall(r"<(?!/)([^>]+)>", chunk))
-                close_tags = len(re.findall(r"</([^>]+)>", chunk))
-                if open_tags != close_tags:
-                    warnings.append(f"Chunk {i + 1} may have unbalanced HTML tags")
-
-        return warnings
+        return cleaned_chunks

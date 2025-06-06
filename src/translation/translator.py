@@ -1,7 +1,3 @@
-"""
-Enhanced translation logic with multiple output format support and proper chapter preservation.
-"""
-
 import time
 import re
 import json
@@ -34,15 +30,24 @@ class BookTranslator:
     def __init__(
         self,
         llm: LLM,
-        chunk_size: int = 20000,
+        chunk_size: int = 8000,  # Reduced for better GPT-4o handling
         max_retries: int = 3,
         retry_delay: int = 180,
         progress_file: Optional[str] = None,
         extra_prompts: str = "",
         output_formats: Optional[List[str]] = None,
+        overlap_size: int = 300,  # Increased overlap for better context
+        preserve_html: bool = True,
+        min_chunk_size: int = 500,
     ):
         self.llm = llm
-        self.chunker = TextChunker(chunk_size)
+        # Use the improved chunker with better book-aware splitting
+        self.chunker = TextChunker(
+            max_chunk_size=chunk_size,
+            overlap_size=overlap_size,
+            preserve_html=preserve_html,
+            min_chunk_size=min_chunk_size,
+        )
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self.extra_prompts = extra_prompts
@@ -61,6 +66,9 @@ class BookTranslator:
         if progress_file:
             cache_path = Path(progress_file).with_suffix('.chapters.json')
             self.chapters_cache_file = cache_path
+
+        # Track chunk metadata for consistency analysis
+        self.chunk_metadata_cache = {}
 
     def _parse_output_formats(self, formats: List[str]) -> Set[OutputFormat]:
         """Parse and validate output formats."""
@@ -91,6 +99,7 @@ class BookTranslator:
                     'number': chapter['number'],
                     'title': chapter['title'],
                     'content': chapter['content'],
+                    'metadata': chapter.get('metadata', {}),
                     # Don't save original_item as it's not serializable
                 })
             
@@ -116,6 +125,7 @@ class BookTranslator:
                     'number': chapter_data['number'],
                     'title': chapter_data['title'],
                     'content': chapter_data['content'],
+                    'metadata': chapter_data.get('metadata', {}),
                     'original_item': None  # Will be None for cached chapters
                 })
             
@@ -149,6 +159,7 @@ class BookTranslator:
 
         print(f"📚 Found {total_chapters} chapters to process")
         print(f"🔄 Translation: {from_lang} → {to_lang}")
+        print(f"🔧 Using TextChunker with max_chunk_size={self.chunker.max_chunk_size}, overlap={self.chunker.overlap_size}")
         print(
             f"📖 Processing chapters {from_chapter} to {min(to_chapter, total_chapters)}"
         )
@@ -203,6 +214,7 @@ class BookTranslator:
                                 'number': current_chapter,
                                 'title': chapter_title,
                                 'content': '[Previously translated content not available in cache]',
+                                'metadata': {},
                                 'original_item': item
                             })
                         
@@ -219,7 +231,7 @@ class BookTranslator:
                             print(f"📄 Resuming from chunk {start_chunk + 1}")
 
                     # Translate chapter
-                    translated_content = self._translate_chapter(
+                    translated_content, chapter_metadata = self._translate_chapter(
                         item, from_lang, to_lang, current_chapter, start_chunk
                     )
 
@@ -228,6 +240,7 @@ class BookTranslator:
                         "number": current_chapter,
                         "title": self._extract_chapter_title(item, current_chapter),
                         "content": translated_content,
+                        "metadata": chapter_metadata,
                         "original_item": item,
                     }
                     
@@ -253,6 +266,7 @@ class BookTranslator:
                     self._save_chapter_cache()
 
                     print(f"✅ Chapter {current_chapter} completed")
+                    self._print_chapter_statistics(chapter_metadata)
 
                 current_chapter += 1
 
@@ -263,6 +277,16 @@ class BookTranslator:
             print(f"\n❌ Translation interrupted at chapter {current_chapter}")
             print(f"💾 Progress saved. Resume with: --from-chapter {current_chapter}")
             raise TranslationError(f"Translation failed: {e}")
+
+    def _print_chapter_statistics(self, metadata: dict):
+        """Print chapter translation statistics."""
+        if metadata:
+            print("    📊 Chapter stats:")
+            print(f"       • Total chunks: {metadata.get('total_chunks', 'N/A')}")
+            print(f"       • Total characters: {metadata.get('total_characters', 'N/A'):,}")
+            print(f"       • Total words: {metadata.get('total_words', 'N/A'):,}")
+            print(f"       • HTML content: {'Yes' if metadata.get('has_html', False) else 'No'}")
+            print(f"       • Dialogue detected: {'Yes' if metadata.get('has_dialogue', False) else 'No'}")
 
     def _generate_outputs(
         self, original_book, output_path: str, from_lang: str, to_lang: str
@@ -306,6 +330,16 @@ class BookTranslator:
             f.write(
                 f"*Translation generated on {time.strftime('%Y-%m-%d %H:%M:%S')}*\n\n"
             )
+            
+            # Write translation statistics
+            total_chapters = len([ch for ch in self.translated_chapters if ch['content'].strip()])
+            total_chars = sum(len(ch['content']) for ch in self.translated_chapters)
+            total_words = sum(len(ch['content'].split()) for ch in self.translated_chapters)
+            
+            f.write("**Translation Statistics:**\n")
+            f.write(f"- Chapters translated: {total_chapters}\n")
+            f.write(f"- Total characters: {total_chars:,}\n")
+            f.write(f"- Total words: {total_words:,}\n\n")
             f.write("---\n\n")
 
             # Write chapters
@@ -762,16 +796,20 @@ class BookTranslator:
 
     def _translate_chapter(
         self, item, from_lang: str, to_lang: str, chapter_num: int, start_chunk: int = 0
-    ) -> str:
-        """Translate a single chapter."""
-        soup = BeautifulSoup(item.content, "html.parser")
-
-        # Extract clean text content, preserving structure
-        text = self._extract_clean_text(soup)
-
-        chunks = self.chunker.split_text(text)
+    ) -> tuple[str, dict]:
+        """Translate a single chapter using improved chunker with enhanced integration."""
+        
+        # Let the chunker decide how to handle the content
+        raw_content = str(item.content)
+        
+        # The improved chunker automatically detects and handles HTML vs plain text
+        chunks = self.chunker.split_text(raw_content)
         total_chunks = len(chunks)
-
+        
+        # Determine content type for logging
+        is_html = self.chunker._has_html_content(raw_content)
+        content_type = "HTML" if is_html else "plain text"
+        print(f"  🔍 Processing as {content_type} content")
         print(f"  📄 Split into {total_chunks} chunks")
 
         # Initialize progress tracking for this chapter
@@ -779,13 +817,34 @@ class BookTranslator:
             self.progress_tracker.start_chapter(chapter_num, total_chunks)
 
         translated_chunks = []
+        chapter_metadata = {
+            'total_chunks': total_chunks,
+            'content_type': content_type,
+            'start_chunk': start_chunk,
+            'errors': [],
+            'chunk_stats': []
+        }
 
         for i, chunk in enumerate(chunks[start_chunk:], start=start_chunk):
             print(f"    🔄 Chunk {i + 1}/{total_chunks}...")
+            
+            # Generate chunk metadata for better translation context
+            chunk_metadata = self._analyze_chunk(chunk, i, total_chunks, is_html)
 
             try:
-                translated_chunk = self._translate_chunk(chunk, from_lang, to_lang)
+                translated_chunk = self._translate_chunk_with_context(
+                    chunk, from_lang, to_lang, chunk_metadata
+                )
                 translated_chunks.append(translated_chunk)
+                
+                # Store chunk statistics
+                chapter_metadata['chunk_stats'].append({
+                    'index': i,
+                    'original_length': len(chunk),
+                    'translated_length': len(translated_chunk),
+                    'is_html': is_html,
+                    'metadata': chunk_metadata
+                })
 
                 # Update progress
                 if self.progress_tracker:
@@ -794,15 +853,205 @@ class BookTranslator:
                     )
 
             except Exception as e:
+                error_info = {
+                    'chunk_index': i,
+                    'error': str(e),
+                    'chunk_preview': chunk[:100] + '...' if len(chunk) > 100 else chunk
+                }
+                chapter_metadata['errors'].append(error_info)
+                
                 # Record error in progress tracker
                 if self.progress_tracker:
                     self.progress_tracker.record_error(chapter_num, str(e))
+                
                 raise TranslationError(f"Failed to translate chunk {i + 1}: {e}")
 
-        return "\n\n".join(translated_chunks)
+        # Combine translated chunks intelligently
+        if is_html:
+            final_translation = self._combine_html_chunks(translated_chunks)
+        else:
+            final_translation = self._combine_text_chunks(translated_chunks)
+            
+        return final_translation, chapter_metadata
+
+    def _analyze_chunk(self, chunk: str, index: int, total_chunks: int, is_html: bool) -> dict:
+        """Analyze chunk to provide context for better translation."""
+        metadata = {
+            'index': index,
+            'total_chunks': total_chunks,
+            'position': 'beginning' if index < total_chunks * 0.2 else 
+                       'end' if index > total_chunks * 0.8 else 'middle',
+            'character_count': len(chunk),
+            'is_html': is_html,
+            'has_dialogue': False,
+            'paragraph_count': 0
+        }
+        
+        if is_html:
+            # Analyze HTML content
+            soup = BeautifulSoup(chunk, 'html.parser')
+            text_content = soup.get_text()
+            metadata['paragraph_count'] = len(soup.find_all(['p', 'div']))
+            metadata['has_dialogue'] = self._detect_dialogue(text_content)
+        else:
+            # Analyze plain text
+            metadata['paragraph_count'] = len([p for p in chunk.split('\n\n') if p.strip()])
+            metadata['has_dialogue'] = self._detect_dialogue(chunk)
+            
+        return metadata
+
+    def _detect_dialogue(self, text: str) -> bool:
+        """Detect if text contains dialogue."""
+        dialogue_indicators = ['"', '"', '"', "'", "'", "'", '—', '--']
+        return any(indicator in text for indicator in dialogue_indicators)
+
+    def _translate_chunk_with_context(
+        self, chunk: str, from_lang: str, to_lang: str, metadata: dict
+    ) -> str:
+        """Translate a chunk with contextual information, with improved retry/backoff logic."""
+
+        prompt = self._create_contextual_translation_prompt(
+            chunk, from_lang, to_lang, metadata
+        )
+
+        for attempt in range(self.max_retries):
+            try:
+                response = self.llm.complete(prompt)
+                translated = response.text.strip()
+
+                if self._validate_translation(chunk, translated, metadata):
+                    return translated
+                elif attempt == 0:
+                    print("    ⚠️  Translation quality check failed, retrying...")
+
+            except Exception as e:
+                error_msg = str(e).lower()
+
+                # Handle rate limits
+                if "rate limit" in error_msg or "quota" in error_msg:
+                    wait_time = self.retry_delay * (2 ** attempt)
+                    print(f"    ⏳ Rate limit hit. Waiting {wait_time}s... (attempt {attempt + 1}/{self.max_retries})")
+                    time.sleep(wait_time)
+                    continue
+
+                # Other errors: continue with increasing wait
+                print(f"    ⚠️  Error on attempt {attempt + 1}/{self.max_retries}: {e}")
+                if attempt < self.max_retries - 1:
+                    wait_time = 5 * (attempt + 1)
+                    print(f"    ⏳ Waiting {wait_time}s before retry...")
+                    time.sleep(wait_time)
+                    continue
+
+                raise TranslationError(
+                    f"Translation failed after {self.max_retries} attempts: {e}"
+                )
+
+        # Final fallback (should not reach here if retries succeed)
+        raise TranslationError("Translation failed: unknown issue.")
+
+
+    def _create_contextual_translation_prompt(
+        self, text: str, from_lang: str, to_lang: str, metadata: dict
+    ) -> str:
+        """Create translation prompt with contextual information."""
+        
+        # Base prompt
+        base_prompt = (
+            f"You are a professional {from_lang}-to-{to_lang} translator specializing in literature. "
+            f"Translate the following text naturally and fluently to {to_lang}. "
+        )
+        
+        # Add context-specific instructions
+        context_instructions = []
+        
+        if metadata['is_html']:
+            context_instructions.append("Preserve HTML structure and formatting.")
+        
+        if metadata['has_dialogue']:
+            context_instructions.append("Pay special attention to dialogue and maintain character voice consistency.")
+        
+        if metadata['position'] == 'beginning':
+            context_instructions.append("This is from the beginning of a chapter - establish tone and context clearly.")
+        elif metadata['position'] == 'end':
+            context_instructions.append("This is from the end of a chapter - maintain narrative continuity and closure.")
+        else:
+            context_instructions.append("This is from the middle of a chapter - maintain narrative flow and consistency.")
+        
+        # Combine instructions
+        if context_instructions:
+            context_prompt = " ".join(context_instructions) + " "
+        else:
+            context_prompt = ""
+        
+        # Final prompt
+        return (
+            f"{base_prompt}"
+            f"{context_prompt}"
+            f"{self.extra_prompts}. "
+            f"Maintain readability and consistency while making it read naturally in {to_lang}. "
+            f"Do not add explanations, comments, or notes - only provide the translation.\n\n"
+            f"Text to translate:\n{text}"
+        )
+
+    def _validate_translation(self, original: str, translated: str, metadata: dict) -> bool:
+        """Basic validation of translation quality."""
+        
+        # Check if translation is not empty
+        if not translated or not translated.strip():
+            return False
+        
+        # Check if translation is not identical to original (unless very short)
+        if len(original) > 50 and original.strip() == translated.strip():
+            return False
+        
+        # For HTML content, check if HTML structure is preserved
+        if metadata['is_html']:
+            try:
+                orig_soup = BeautifulSoup(original, 'html.parser')
+                trans_soup = BeautifulSoup(translated, 'html.parser')
+                
+                # Check if major structural elements are preserved
+                orig_tags = [getattr(tag, "name", None) for tag in orig_soup.find_all() if getattr(tag, "name", None) is not None]
+                trans_tags = [getattr(tag, "name", None) for tag in trans_soup.find_all() if getattr(tag, "name", None) is not None]
+                
+                # Allow some flexibility in tag preservation
+                if len(orig_tags) > 0 and len(trans_tags) == 0:
+                    return False
+                    
+            except Exception:
+                # If parsing fails, accept the translation
+                pass
+        
+        # Check reasonable length ratio (translation shouldn't be too short or too long)
+        length_ratio = len(translated) / len(original) if len(original) > 0 else 0
+        if length_ratio < 0.3 or length_ratio > 3.0:
+            return False
+        
+        return True
+
+    def _combine_html_chunks(self, chunks: List[str]) -> str:
+        """Intelligently combine HTML chunks."""
+        if not chunks:
+            return ""
+        
+        # For HTML, simply join with newlines - the chunker should have
+        # preserved proper HTML structure
+        return "\n".join(chunks)
+
+    def _combine_text_chunks(self, chunks: List[str]) -> str:
+        """Intelligently combine text chunks."""
+        if not chunks:
+            return ""
+        
+        # For plain text, join with double newlines to preserve paragraph structure
+        return "\n\n".join(chunks)
 
     def _extract_clean_text(self, soup: BeautifulSoup) -> str:
-        """Extract clean text from HTML, preserving paragraph structure."""
+        """Extract clean text from HTML, preserving paragraph structure.
+        
+        Note: This method is now primarily used for fallback cases
+        since the improved chunker handles HTML directly.
+        """
         # Remove script and style elements
         for script in soup(["script", "style"]):
             script.decompose()
@@ -815,50 +1064,3 @@ class BookTranslator:
         text = re.sub(r"[ \t]+", " ", text)
 
         return text.strip()
-
-    def _translate_chunk(self, text: str, from_lang: str, to_lang: str) -> str:
-        """Translate a single chunk of text."""
-        prompt = self._create_translation_prompt(text, from_lang, to_lang)
-
-        for attempt in range(self.max_retries):
-            try:
-                response = self.llm.complete(prompt)
-                return response.text.strip()
-
-            except Exception as e:
-                error_msg = str(e).lower()
-
-                # Handle rate limiting
-                if "rate limit" in error_msg or "quota" in error_msg:
-                    if attempt < self.max_retries - 1:
-                        print(
-                            f"    ⏳ Rate limit hit. Waiting {self.retry_delay}s... (attempt {attempt + 1}/{self.max_retries})"
-                        )
-                        time.sleep(self.retry_delay)
-                        continue
-
-                # Handle other errors
-                if attempt < self.max_retries - 1:
-                    print(f"    ⚠️  Error on attempt {attempt + 1}: {e}")
-                    time.sleep(5)  # Short delay
-                    continue
-
-                # Final attempt failed
-                raise TranslationError(
-                    f"Translation failed after {self.max_retries} attempts: {e}"
-                )
-
-        return ""
-
-    def _create_translation_prompt(
-        self, text: str, from_lang: str, to_lang: str
-    ) -> str:
-        """Create translation prompt."""
-        return (
-            f"You are a professional {from_lang}-to-{to_lang} translator. "
-            f"Translate the following text naturally and fluently to {to_lang}. "
-            f"{self.extra_prompts}. "
-            f"Maintain readability and consistency with the source text while making it read naturally in {to_lang}. "
-            f"Do not add explanations, comments, or notes - only provide the translation.\n\n"
-            f"Text to translate:\n{text}"
-        )
