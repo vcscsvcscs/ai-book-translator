@@ -3,7 +3,6 @@ Enhanced translation logic with multiple output format support and proper chapte
 """
 
 import time
-import re
 import json
 from pathlib import Path
 from typing import Optional, List, Set
@@ -13,10 +12,16 @@ import ebooklib
 from ebooklib import epub
 from bs4 import BeautifulSoup
 from llama_index.core.llms import LLM
-import html
 
 from .chunker import TextChunker
 from .progress import ProgressTracker
+from utils.font_utils import register_unicode_fonts
+from utils.text_utils import (
+    extract_clean_text,
+    clean_unicode_text,
+    create_clean_xhtml,
+    escape_html,
+)
 from utils.exceptions import TranslationError
 
 
@@ -55,11 +60,11 @@ class BookTranslator:
 
         # Store translated chapters for multi-format output
         self.translated_chapters = []
-        
+
         # Cache file for storing completed chapter data
         self.chapters_cache_file = None
         if progress_file:
-            cache_path = Path(progress_file).with_suffix('.chapters.json')
+            cache_path = Path(progress_file).with_suffix(".chapters.json")
             self.chapters_cache_file = cache_path
 
     def _parse_output_formats(self, formats: List[str]) -> Set[OutputFormat]:
@@ -82,21 +87,23 @@ class BookTranslator:
         """Save completed chapters to cache file."""
         if not self.chapters_cache_file:
             return
-            
+
         try:
             # Prepare serializable data
             cache_data = []
             for chapter in self.translated_chapters:
-                cache_data.append({
-                    'number': chapter['number'],
-                    'title': chapter['title'],
-                    'content': chapter['content'],
-                    # Don't save original_item as it's not serializable
-                })
-            
-            with open(self.chapters_cache_file, 'w', encoding='utf-8') as f:
+                cache_data.append(
+                    {
+                        "number": chapter["number"],
+                        "title": chapter["title"],
+                        "content": chapter["content"],
+                        # Don't save original_item as it's not serializable
+                    }
+                )
+
+            with open(self.chapters_cache_file, "w", encoding="utf-8") as f:
                 json.dump(cache_data, f, indent=2, ensure_ascii=False)
-                
+
         except Exception as e:
             print(f"⚠️  Warning: Could not save chapter cache: {e}")
 
@@ -104,27 +111,29 @@ class BookTranslator:
         """Load completed chapters from cache file."""
         if not self.chapters_cache_file or not self.chapters_cache_file.exists():
             return
-            
+
         try:
-            with open(self.chapters_cache_file, 'r', encoding='utf-8') as f:
+            with open(self.chapters_cache_file, "r", encoding="utf-8") as f:
                 cache_data = json.load(f)
-            
+
             # Convert back to chapter format
             cached_chapters = []
             for chapter_data in cache_data:
-                cached_chapters.append({
-                    'number': chapter_data['number'],
-                    'title': chapter_data['title'],
-                    'content': chapter_data['content'],
-                    'original_item': None  # Will be None for cached chapters
-                })
-            
+                cached_chapters.append(
+                    {
+                        "number": chapter_data["number"],
+                        "title": chapter_data["title"],
+                        "content": chapter_data["content"],
+                        "original_item": None,  # Will be None for cached chapters
+                    }
+                )
+
             # Sort by chapter number
-            cached_chapters.sort(key=lambda x: x['number'])
+            cached_chapters.sort(key=lambda x: x["number"])
             self.translated_chapters = cached_chapters
-            
+
             print(f"📄 Loaded {len(cached_chapters)} completed chapters from cache")
-            
+
         except Exception as e:
             print(f"⚠️  Warning: Could not load chapter cache: {e}")
             self.translated_chapters = []
@@ -192,20 +201,29 @@ class BookTranslator:
                         print(
                             f"✅ Chapter {current_chapter} already completed, skipping..."
                         )
-                        
+
                         # Ensure the chapter is in our translated_chapters list
-                        if not any(ch['number'] == current_chapter for ch in self.translated_chapters):
+                        if not any(
+                            ch["number"] == current_chapter
+                            for ch in self.translated_chapters
+                        ):
                             # This shouldn't happen if cache is working, but as a fallback
                             # we can try to reconstruct from the original if needed
-                            chapter_title = self._extract_chapter_title(item, current_chapter)
-                            print(f"⚠️  Chapter {current_chapter} was completed but not in cache, adding placeholder")
-                            self.translated_chapters.append({
-                                'number': current_chapter,
-                                'title': chapter_title,
-                                'content': '[Previously translated content not available in cache]',
-                                'original_item': item
-                            })
-                        
+                            chapter_title = self._extract_chapter_title(
+                                item, current_chapter
+                            )
+                            print(
+                                f"⚠️  Chapter {current_chapter} was completed but not in cache, adding placeholder"
+                            )
+                            self.translated_chapters.append(
+                                {
+                                    "number": current_chapter,
+                                    "title": chapter_title,
+                                    "content": "[Previously translated content not available in cache]",
+                                    "original_item": item,
+                                }
+                            )
+
                         current_chapter += 1
                         continue
 
@@ -230,20 +248,20 @@ class BookTranslator:
                         "content": translated_content,
                         "original_item": item,
                     }
-                    
+
                     # Add or update chapter in our list
                     existing_chapter_idx = None
                     for i, ch in enumerate(self.translated_chapters):
-                        if ch['number'] == current_chapter:
+                        if ch["number"] == current_chapter:
                             existing_chapter_idx = i
                             break
-                    
+
                     if existing_chapter_idx is not None:
                         self.translated_chapters[existing_chapter_idx] = chapter_data
                     else:
                         self.translated_chapters.append(chapter_data)
                         # Keep list sorted by chapter number
-                        self.translated_chapters.sort(key=lambda x: x['number'])
+                        self.translated_chapters.sort(key=lambda x: x["number"])
 
                     # Mark chapter as complete
                     if self.progress_tracker:
@@ -271,8 +289,8 @@ class BookTranslator:
         base_path = Path(output_path).with_suffix("")
 
         # Ensure we have all chapters sorted by number
-        self.translated_chapters.sort(key=lambda x: x['number'])
-        
+        self.translated_chapters.sort(key=lambda x: x["number"])
+
         print(f"📄 Generating outputs with {len(self.translated_chapters)} chapters")
 
         for format_type in self.output_formats:
@@ -362,7 +380,7 @@ class BookTranslator:
                     continue
 
                 # Create clean XHTML content
-                xhtml_content = self._create_clean_xhtml(
+                xhtml_content = create_clean_xhtml(
                     chapter["title"], chapter["content"]
                 )
 
@@ -405,39 +423,6 @@ class BookTranslator:
         except Exception as e:
             raise TranslationError(f"Failed to generate EPUB: {e}")
 
-    def _create_clean_xhtml(self, title: str, content: str) -> str:
-        """Create clean XHTML content with proper XML structure."""
-        # Escape HTML entities in content
-        clean_content = html.escape(content)
-
-        # Convert line breaks to paragraphs
-        paragraphs = clean_content.split("\n\n")
-        formatted_paragraphs = []
-
-        for para in paragraphs:
-            para = para.strip()
-            if para:
-                # Replace single line breaks with spaces
-                para = re.sub(r"\n+", " ", para)
-                formatted_paragraphs.append(f"    <p>{para}</p>")
-
-        xhtml_template = """<?xml version="1.0" encoding="utf-8"?>
-<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
-<html xmlns="http://www.w3.org/1999/xhtml">
-<head>
-    <title>{title}</title>
-    <link rel="stylesheet" type="text/css" href="style.css"/>
-</head>
-<body>
-    <h1>{title}</h1>
-{content}
-</body>
-</html>"""
-
-        return xhtml_template.format(
-            title=html.escape(title), content="\n".join(formatted_paragraphs)
-        )
-
     def _generate_pdf(self, output_path: Path, from_lang: str, to_lang: str):
         """Generate PDF output using reportlab (pure Python)."""
         try:
@@ -459,7 +444,7 @@ class BookTranslator:
 
         try:
             # Register Unicode-compatible fonts
-            self._register_unicode_fonts()
+            register_unicode_fonts()
 
             # Create PDF document
             doc = SimpleDocTemplate(
@@ -550,7 +535,7 @@ class BookTranslator:
 
                 # Add chapter title
                 story.append(
-                    Paragraph(self._escape_html(chapter["title"]), chapter_title_style)
+                    Paragraph(escape_html(chapter["title"]), chapter_title_style)
                 )
 
                 # Process chapter content
@@ -572,7 +557,7 @@ class BookTranslator:
                                 if len(" ".join(current_chunk)) > 800:
                                     story.append(
                                         Paragraph(
-                                            self._escape_html(" ".join(current_chunk)),
+                                            escape_html(" ".join(current_chunk)),
                                             body_style,
                                         )
                                     )
@@ -582,16 +567,16 @@ class BookTranslator:
                             if current_chunk:
                                 story.append(
                                     Paragraph(
-                                        self._escape_html(" ".join(current_chunk)),
+                                        escape_html(" ".join(current_chunk)),
                                         body_style,
                                     )
                                 )
                         else:
                             # Ensure proper Unicode handling
-                            clean_paragraph = self._clean_unicode_text(paragraph)
+                            clean_paragraph = clean_unicode_text(paragraph)
                             story.append(
                                 Paragraph(
-                                    self._escape_html(clean_paragraph), body_style
+                                    escape_html(clean_paragraph), body_style
                                 )
                             )
 
@@ -614,105 +599,6 @@ class BookTranslator:
 
         except Exception as e:
             raise TranslationError(f"Failed to generate PDF: {e}")
-
-    def _clean_unicode_text(self, text: str) -> str:
-        """Clean and normalize Unicode text for PDF generation."""
-        import unicodedata
-
-        # Normalize Unicode characters (NFKC normalization)
-        normalized = unicodedata.normalize("NFKC", text)
-
-        # Ensure the text is properly encoded
-        try:
-            # Test if the text can be encoded/decoded properly
-            normalized.encode("utf-8").decode("utf-8")
-            return normalized
-        except UnicodeError:
-            # If there are encoding issues, try to fix them
-            return normalized.encode("utf-8", errors="replace").decode("utf-8")
-
-    def _register_unicode_fonts(self):
-        """Register Unicode-compatible fonts for proper character rendering."""
-        try:
-            from reportlab.pdfbase import pdfmetrics
-            from reportlab.pdfbase.ttfonts import TTFont
-            import os
-            import platform
-
-            # Common Unicode font paths by OS
-            font_paths = []
-            system = platform.system().lower()
-
-            if system == "windows":
-                font_paths = [
-                    "C:/Windows/Fonts/arial.ttf",
-                    "C:/Windows/Fonts/calibri.ttf",
-                    "C:/Windows/Fonts/times.ttf",
-                    "C:/Windows/Fonts/DejaVuSans.ttf",
-                ]
-            elif system == "darwin":  # macOS
-                font_paths = [
-                    "/System/Library/Fonts/Arial.ttf",
-                    "/System/Library/Fonts/Times.ttc",
-                    "/System/Library/Fonts/Helvetica.ttc",
-                    "/opt/homebrew/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-                    "/usr/local/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-                ]
-            else:  # Linux
-                font_paths = [
-                    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-                    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-                    "/usr/share/fonts/TTF/DejaVuSans.ttf",
-                    "/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf",
-                    "/usr/share/fonts/opentype/noto/NotoSans-Regular.ttf",
-                ]
-
-            # Try to register the first available font
-            font_registered = False
-            for font_path in font_paths:
-                if os.path.exists(font_path):
-                    try:
-                        pdfmetrics.registerFont(TTFont("UnicodeFont", font_path))
-                        font_registered = True
-                        print(f"📝 Using Unicode font: {os.path.basename(font_path)}")
-                        break
-                    except Exception:
-                        continue
-
-            if not font_registered:
-                print("⚠️  No Unicode font found, falling back to built-in fonts")
-                print("   Some characters may not display correctly")
-
-        except Exception as e:
-            print(f"⚠️  Font registration failed: {e}")
-
-    def _get_unicode_font_name(self):
-        """Get the name of the registered Unicode font."""
-        try:
-            from reportlab.pdfbase import pdfmetrics
-
-            # Check if our Unicode font was registered
-            if "UnicodeFont" in pdfmetrics.getRegisteredFontNames():
-                return "UnicodeFont"
-        except Exception:
-            pass
-
-        # Fall back to Helvetica which has better Unicode support than Times-Roman
-        return "Helvetica"
-
-    def _escape_html(self, text: str) -> str:
-        """Escape HTML characters for reportlab."""
-        import html
-
-        # First escape HTML entities
-        escaped = html.escape(text)
-
-        # Handle reportlab-specific escaping
-        escaped = escaped.replace("&", "&amp;")
-        escaped = escaped.replace("<", "&lt;")
-        escaped = escaped.replace(">", "&gt;")
-
-        return escaped
 
     def _create_markdown_content(self, from_lang: str, to_lang: str) -> str:
         """Create markdown content from translated chapters."""
@@ -767,7 +653,7 @@ class BookTranslator:
         soup = BeautifulSoup(item.content, "html.parser")
 
         # Extract clean text content, preserving structure
-        text = self._extract_clean_text(soup)
+        text = extract_clean_text(soup)
 
         chunks = self.chunker.split_text(text)
         total_chunks = len(chunks)
@@ -800,21 +686,6 @@ class BookTranslator:
                 raise TranslationError(f"Failed to translate chunk {i + 1}: {e}")
 
         return "\n\n".join(translated_chunks)
-
-    def _extract_clean_text(self, soup: BeautifulSoup) -> str:
-        """Extract clean text from HTML, preserving paragraph structure."""
-        # Remove script and style elements
-        for script in soup(["script", "style"]):
-            script.decompose()
-
-        # Get text with some structure preservation
-        text = soup.get_text(separator="\n\n", strip=True)
-
-        # Clean up excessive whitespace
-        text = re.sub(r"\n\s*\n\s*\n+", "\n\n", text)
-        text = re.sub(r"[ \t]+", " ", text)
-
-        return text.strip()
 
     def _translate_chunk(self, text: str, from_lang: str, to_lang: str) -> str:
         """Translate a single chunk of text."""
