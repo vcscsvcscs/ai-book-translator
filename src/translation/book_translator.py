@@ -51,6 +51,7 @@ class BookTranslator:
             self.progress_tracker,
         )
         self.output_generator = OutputGenerator(self.translated_chapters)
+        self.output_generator.output_formats = self.output_formats
 
     def _parse_output_formats(self, formats: List[str]) -> Set[OutputFormat]:
         """Parse and validate output formats."""
@@ -118,12 +119,12 @@ class BookTranslator:
                     print(f"✅ Chapter {current_chapter} completed")
                 elif to_chapter < current_chapter:
                     break
-                
+
                 current_chapter += 1
 
             # Generate all requested output formats
             self.output_generator.generate_outputs(
-                book, output_path, from_lang, to_lang, self.output_formats
+                book, output_path, from_lang, to_lang
             )
 
         except Exception as e:
