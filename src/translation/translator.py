@@ -3,17 +3,20 @@ Enhanced translation logic with multiple output format support and proper chapte
 """
 
 import time
-import json
 from pathlib import Path
-from typing import Optional, List, Set
-from enum import Enum
+from typing import Optional, List
 
 import ebooklib
 from ebooklib import epub
 from bs4 import BeautifulSoup
 from llama_index.core.llms import LLM
 
-from .chunker import TextChunker
+from .output.formats import parse_output_formats, OutputFormat
+from .output.generators import generate_epub, generate_pdf, generate_markdown
+
+from .chapter_cache import ChapterCache
+from .chapter_translator import ChapterTranslator
+
 from .progress import ProgressTracker
 from utils.font_utils import register_unicode_fonts
 from utils.text_utils import (
@@ -23,15 +26,7 @@ from utils.text_utils import (
     escape_html,
 )
 from utils.exceptions import TranslationError
-
-
-class OutputFormat(Enum):
-    """Supported output formats."""
-
-    EPUB = "epub"
-    PDF = "pdf"
-    MARKDOWN = "markdown"
-
+from .chunker import TextChunker
 
 class BookTranslator:
     """Handles book translation using LLM providers with multiple output formats."""
@@ -47,96 +42,37 @@ class BookTranslator:
         output_formats: Optional[List[str]] = None,
     ):
         self.llm = llm
-        self.chunker = TextChunker(chunk_size)
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self.extra_prompts = extra_prompts
+        
+        # Initialize progress tracking
         self.progress_tracker = (
             ProgressTracker(progress_file) if progress_file else None
         )
 
+        self.chunker = TextChunker(chunk_size)
+
+        # Initialize chapter cache
+        cache_file = None
+        if progress_file:
+            cache_file = Path(progress_file).with_suffix('.chapters.json')
+        self.chapter_cache = ChapterCache(cache_file)
+
+        # Initialize chapter translator
+        self.chapter_translator = ChapterTranslator(
+            llm=llm,
+            chunk_size=chunk_size,
+            max_retries=max_retries,
+            retry_delay=retry_delay,
+            extra_prompts=extra_prompts
+        )
+
         # Parse output formats
-        self.output_formats = self._parse_output_formats(output_formats or ["markdown"])
+        self.output_formats = parse_output_formats(output_formats or ["markdown"])
 
         # Store translated chapters for multi-format output
         self.translated_chapters = []
-
-        # Cache file for storing completed chapter data
-        self.chapters_cache_file = None
-        if progress_file:
-            cache_path = Path(progress_file).with_suffix(".chapters.json")
-            self.chapters_cache_file = cache_path
-
-    def _parse_output_formats(self, formats: List[str]) -> Set[OutputFormat]:
-        """Parse and validate output formats."""
-        valid_formats = set()
-        for fmt in formats:
-            try:
-                valid_formats.add(OutputFormat(fmt.lower()))
-            except ValueError:
-                raise TranslationError(
-                    f"Invalid output format: {fmt}. Supported formats: epub, pdf, markdown"
-                )
-
-        if not valid_formats:
-            valid_formats.add(OutputFormat.MARKDOWN)  # Default fallback
-
-        return valid_formats
-
-    def _save_chapter_cache(self):
-        """Save completed chapters to cache file."""
-        if not self.chapters_cache_file:
-            return
-
-        try:
-            # Prepare serializable data
-            cache_data = []
-            for chapter in self.translated_chapters:
-                cache_data.append(
-                    {
-                        "number": chapter["number"],
-                        "title": chapter["title"],
-                        "content": chapter["content"],
-                        # Don't save original_item as it's not serializable
-                    }
-                )
-
-            with open(self.chapters_cache_file, "w", encoding="utf-8") as f:
-                json.dump(cache_data, f, indent=2, ensure_ascii=False)
-
-        except Exception as e:
-            print(f"⚠️  Warning: Could not save chapter cache: {e}")
-
-    def _load_chapter_cache(self):
-        """Load completed chapters from cache file."""
-        if not self.chapters_cache_file or not self.chapters_cache_file.exists():
-            return
-
-        try:
-            with open(self.chapters_cache_file, "r", encoding="utf-8") as f:
-                cache_data = json.load(f)
-
-            # Convert back to chapter format
-            cached_chapters = []
-            for chapter_data in cache_data:
-                cached_chapters.append(
-                    {
-                        "number": chapter_data["number"],
-                        "title": chapter_data["title"],
-                        "content": chapter_data["content"],
-                        "original_item": None,  # Will be None for cached chapters
-                    }
-                )
-
-            # Sort by chapter number
-            cached_chapters.sort(key=lambda x: x["number"])
-            self.translated_chapters = cached_chapters
-
-            print(f"📄 Loaded {len(cached_chapters)} completed chapters from cache")
-
-        except Exception as e:
-            print(f"⚠️  Warning: Could not load chapter cache: {e}")
-            self.translated_chapters = []
 
     def translate_book(
         self,
@@ -182,7 +118,7 @@ class BookTranslator:
                 print(f"   - Current chapter: {progress.current_chapter}")
 
         # Load previously completed chapters from cache
-        self._load_chapter_cache()
+        self.translated_chapters = self.chapter_cache.load_chapters()
 
         current_chapter = 1
 
@@ -268,7 +204,7 @@ class BookTranslator:
                         self.progress_tracker.complete_chapter(current_chapter)
 
                     # Save chapter cache after each completed chapter
-                    self._save_chapter_cache()
+                    self.chapter_cache.save_chapters(self.translated_chapters)
 
                     print(f"✅ Chapter {current_chapter} completed")
 
@@ -296,18 +232,18 @@ class BookTranslator:
         for format_type in self.output_formats:
             try:
                 if format_type == OutputFormat.MARKDOWN:
-                    self._generate_markdown(
+                    generate_markdown(
                         base_path.with_suffix(".md"), from_lang, to_lang
                     )
                 elif format_type == OutputFormat.EPUB:
-                    self._generate_epub(
+                    generate_epub(
                         original_book,
                         base_path.with_suffix(".epub"),
                         from_lang,
                         to_lang,
                     )
                 elif format_type == OutputFormat.PDF:
-                    self._generate_pdf(
+                    generate_pdf(
                         base_path.with_suffix(".pdf"), from_lang, to_lang
                     )
 
