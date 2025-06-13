@@ -18,7 +18,7 @@ from .chapter_cache import ChapterCache
 from .chapter_translator import ChapterTranslator
 
 from .progress import ProgressTracker
-from utils.font_utils import register_unicode_fonts
+from utils.font_utils import register_unicode_fonts, get_unicode_font_name
 from utils.text_utils import (
     extract_clean_text,
     clean_unicode_text,
@@ -233,17 +233,20 @@ class BookTranslator:
             try:
                 if format_type == OutputFormat.MARKDOWN:
                     generate_markdown(
+                        self.translated_chapters,
                         base_path.with_suffix(".md"), from_lang, to_lang
                     )
                 elif format_type == OutputFormat.EPUB:
                     generate_epub(
-                        original_book,
+                        self.translated_chapters,
                         base_path.with_suffix(".epub"),
                         from_lang,
                         to_lang,
+                        original_book,
                     )
                 elif format_type == OutputFormat.PDF:
                     generate_pdf(
+                        self.translated_chapters,
                         base_path.with_suffix(".pdf"), from_lang, to_lang
                     )
 
@@ -396,7 +399,7 @@ class BookTranslator:
             styles = getSampleStyleSheet()
 
             # Create custom styles with Unicode font
-            unicode_font = self._get_unicode_font_name()
+            unicode_font = get_unicode_font_name()
 
             title_style = ParagraphStyle(
                 "CustomTitle",
