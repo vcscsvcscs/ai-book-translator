@@ -49,6 +49,9 @@ class BookTranslator:
         if progress_file:
             cache_file = Path(progress_file).with_suffix('.chapters.json')
         self.chapter_cache = ChapterCache(cache_file)
+        
+        # Initialize the cache (loads existing chunk cache)
+        self.chapter_cache.initialize_cache()
 
         # Initialize chapter translator - this will handle all translation logic
         self.chapter_translator = ChapterTranslator(
@@ -56,7 +59,8 @@ class BookTranslator:
             chunk_size=chunk_size,
             max_retries=max_retries,
             retry_delay=retry_delay,
-            extra_prompts=extra_prompts
+            extra_prompts=extra_prompts,
+            chapter_cache=self.chapter_cache  # Pass cache to translator
         )
 
         # Parse output formats
