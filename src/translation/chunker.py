@@ -24,10 +24,10 @@ class TextChunker:
 
     def __init__(
         self,
-        max_chunk_size: int = 3000,
+        max_chunk_size: int = 1000,
         overlap_size: int = 200,
         preserve_html: bool = True,
-        min_chunk_size: int = 5,
+        min_chunk_size: int = 0,
     ):
         """
         Initialize the text chunker.

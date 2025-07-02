@@ -17,7 +17,7 @@ class ChapterTranslator:
     def __init__(
         self, 
         llm: LLM, 
-        chunk_size: int = 20000,
+        chunk_size: int = 1000,
         max_retries: int = 3,
         retry_delay: int = 180,
         extra_prompts: str = ""
