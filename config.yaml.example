@@ -9,7 +9,7 @@ openai:
 azure:
   api_key: "YOUR_AZURE_OPENAI_API_KEY"
   endpoint: "https://your-resource-name.openai.azure.com/"
-  api_version: "2024-02-01"
+  api_version: "2025-01-01-preview"
   deployment_name: "your-deployment-name"  # The name of your deployed model
 
 # Google Gemini Configuration
