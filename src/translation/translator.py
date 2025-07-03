@@ -177,6 +177,9 @@ class BookTranslator:
                         progress_tracker=self.progress_tracker
                     )
 
+                    if self.chapter_translator.filtered_chunks:
+                        self.progress_tracker._progress.filtered_chunks = self.chapter_translator.filtered_chunks
+
                     # Store chapter data for multi-format output
                     chapter_data = {
                         "number": current_chapter,
@@ -210,10 +213,10 @@ class BookTranslator:
 
                 current_chapter += 1
 
-            # Generate all requested output formats
-            for fc in self.chapter_translator.filtered_chunks:
-                print(f"⚠️  Chunk {fc} was filtered by LLM, leaving as is. Translate")
-                
+            if self.chapter_translator.filtered_chunks:
+                self.progress_tracker._progress.filtered_chunks = self.chapter_translator.filtered_chunks
+                print("⚠️ Some chunks were filtered and not translated. Check progress file for details.")
+
             self._generate_outputs(book, output_path, from_lang, to_lang)
 
         except Exception as e:
