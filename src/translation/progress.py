@@ -65,7 +65,7 @@ class TranslationProgress:
     start_time: float
     last_update_time: float
     chapters: Dict[int, ChapterProgress]
-    filtered_chunks: list[tuple[int,int]]
+    filtered_chunks: list[tuple[int,str]]
 
     @property
     def overall_progress_percentage(self) -> float:
@@ -356,7 +356,10 @@ class ProgressTracker:
                 start_time=data["start_time"],
                 last_update_time=data["last_update_time"],
                 chapters=chapters,
+                filtered_chunks=data.get("filtered_chunks", []),
             )
+
+            print(f"📄 Loaded progress from {self._progress.filtered_chunks}")
 
             return True
 

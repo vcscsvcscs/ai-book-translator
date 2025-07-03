@@ -94,7 +94,7 @@ class ChapterTranslator:
                         continue
 
                 # Translate the chunk
-                translated_chunk = self._translate_chunk(chunk, from_lang, to_lang, (chapter_num, i))
+                translated_chunk = self._translate_chunk(chunk, from_lang, to_lang, (chapter_num, self.chapter_cache._get_chunk_hash(chunk)))
                 translated_chunks.append(translated_chunk)
                 
                 # Cache the translated chunk
@@ -152,7 +152,7 @@ class ChapterTranslator:
                         continue
                 
                 # Translate the chunk
-                translated_chunk = self._translate_chunk(chunk, from_lang, to_lang, (chapter_num,i))
+                translated_chunk = self._translate_chunk(chunk, from_lang, to_lang, (chapter_num, self.chapter_cache._get_chunk_hash(chunk)))
                 translated_chunks.append(translated_chunk)
                 
                 # Cache if chapter_num provided
@@ -234,7 +234,7 @@ class ChapterTranslator:
         
         return remaining
 
-    def _translate_chunk(self, text: str, from_lang: str, to_lang: str, chunk_id: tuple[int,int]) -> str:
+    def _translate_chunk(self, text: str, from_lang: str, to_lang: str, chunk_id: tuple[int,str]) -> str:
         """Translate a single chunk of text."""
         prompt = self._create_translation_prompt(text, from_lang, to_lang)
 
