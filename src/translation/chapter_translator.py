@@ -29,6 +29,7 @@ class ChapterTranslator:
         self.retry_delay = retry_delay
         self.extra_prompts = extra_prompts
         self.chapter_cache = chapter_cache
+        self.filtered_chunks = set()  # Store filtered chunks to avoid reprocessing
 
     def translate_chapter(
         self, 
@@ -93,7 +94,7 @@ class ChapterTranslator:
                         continue
 
                 # Translate the chunk
-                translated_chunk = self._translate_chunk(chunk, from_lang, to_lang)
+                translated_chunk = self._translate_chunk(chunk, from_lang, to_lang, f"chapter_{chapter_num}_chunk_{i + 1}")
                 translated_chunks.append(translated_chunk)
                 
                 # Cache the translated chunk
@@ -151,7 +152,7 @@ class ChapterTranslator:
                         continue
                 
                 # Translate the chunk
-                translated_chunk = self._translate_chunk(chunk, from_lang, to_lang)
+                translated_chunk = self._translate_chunk(chunk, from_lang, to_lang, f"chapter_{chapter_num}_chunk_{i + 1}")
                 translated_chunks.append(translated_chunk)
                 
                 # Cache if chapter_num provided
@@ -233,7 +234,7 @@ class ChapterTranslator:
         
         return remaining
 
-    def _translate_chunk(self, text: str, from_lang: str, to_lang: str) -> str:
+    def _translate_chunk(self, text: str, from_lang: str, to_lang: str, chunk_id: str) -> str:
         """Translate a single chunk of text."""
         prompt = self._create_translation_prompt(text, from_lang, to_lang)
 
@@ -243,6 +244,11 @@ class ChapterTranslator:
                 return response.text.strip()
 
             except Exception as e:
+                if str(e).lower().__contains__("filter"):
+                    print("    ⚠️  Translation blocked by filter. Leaving chunk as it is, translate manually.")
+                    self.filtered_chunks.add(chunk_id)  # Mark this chunk as filtered
+                    return text  # Return original text if blocked by filter
+
                 if attempt < self.max_retries - 1:
                     self._handle_translation_error(e, attempt)
                     continue

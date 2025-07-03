@@ -211,6 +211,9 @@ class BookTranslator:
                 current_chapter += 1
 
             # Generate all requested output formats
+            for fc in self.chapter_translator.filtered_chunks:
+                print(f"⚠️  Chunk {fc} was filtered by LLM, leaving as is. Translate")
+                
             self._generate_outputs(book, output_path, from_lang, to_lang)
 
         except Exception as e:
