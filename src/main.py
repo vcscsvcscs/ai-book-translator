@@ -9,6 +9,7 @@ import sys
 from config.config_loader import ConfigLoader
 from llm.factory import LLMFactory
 from translation.translator import BookTranslator
+from translation.translate_filtered_translations import ChunkFixer
 from epub.reader import EPUBReader
 from epub.analyzer import EnhancedEpubAnalyzer
 from utils.exceptions import TranslationError, ConfigurationError
@@ -111,6 +112,64 @@ Examples:
         "--to-lang", help="Target language code for translation cost estimation"
     )
 
+    # Fix chunks command
+    fix_parser = subparsers.add_parser(
+        "fix-chunks", help="Fix chunks that were blocked by content filters"
+    )
+    fix_parser.add_argument("--input", required=True, help="Input EPUB file path")
+    fix_parser.add_argument(
+        "--output", required=True, help="Output EPUB file path"
+    )
+    fix_parser.add_argument(
+        "--config", required=True, help="Configuration file path"
+    )
+    fix_parser.add_argument(
+        "--output-formats",
+        nargs="+",
+        choices=["epub", "pdf", "markdown"],
+        default=["markdown"],
+        help="Output formats to generate (default: markdown)"
+    )
+    fix_parser.add_argument(
+        "--progress-file",
+        help="Progress file from translation",
+        default="data/progress.json",
+    )
+    fix_parser.add_argument(
+        "--llm-provider",
+        choices=["openai", "azure", "gemini", "ollama"],
+        required=True,
+        help="LLM provider to use",
+    )
+    fix_parser.add_argument(
+        "--from-lang", default="EN", help="Source language code"
+    )
+    fix_parser.add_argument(
+        "--to-lang", default="HU", help="Target language code"
+    )
+    fix_parser.add_argument(
+        "--extra-prompts",
+        type=str,
+        default="Preserve paragraph breaks and formatting structure. ",
+        help="Extra prompts for translation",
+    )
+    fix_parser.add_argument(
+        "--chunk-size",
+        type=int,
+        default=1000,
+        help="Maximum chunk size for translation",
+    )
+    fix_parser.add_argument(
+        "--max-retries", type=int, default=3, help="Maximum retry attempts"
+    )
+
+    fix_parser.add_argument(
+        "--strategy",
+        choices=["original_prompt", "alternative_prompt"],
+        default="original_prompt",
+        help="Strategy for fixing chunks (default: original_prompt)",
+    )
+
     return parser
 
 
@@ -206,6 +265,67 @@ def handle_translate(args):
 
     return 0
 
+def handle_fix_chunks(args):
+    """Handle fix-chunks command."""
+    try:
+        # Load configuration
+        config_loader = ConfigLoader(args.config)
+        config = config_loader.load()
+
+        # Create LLM instance
+        llm_factory = LLMFactory(config)
+        llm = llm_factory.create_llm(args.llm_provider)
+
+        # Create chunk fixer
+        chunk_fixer = ChunkFixer(
+            llm=llm,
+            chunk_size=args.chunk_size,
+            max_retries=args.max_retries,
+            extra_prompts=args.extra_prompts,
+            progress_file=args.progress_file,
+            output_formats=args.output_formats,
+        )
+
+        # Perform chunk fixing
+        chunk_fixer.fix_filtered_chunks(
+            input_path=args.input,
+            output_path=args.output,
+            from_lang=args.from_lang,
+            to_lang=args.to_lang,
+            strategy=args.strategy,
+        )
+
+        # Show generated files
+        from pathlib import Path
+        base_path = Path(args.output).with_suffix('')
+        
+        generated_files = []
+        for fmt in args.output_formats:
+            file_path = None
+            if fmt == "markdown":
+                file_path = base_path.with_suffix('.md')
+            elif fmt == "epub":
+                file_path = base_path.with_suffix('.epub')
+            elif fmt == "pdf":
+                file_path = base_path.with_suffix('.pdf')
+            
+            if file_path is not None and file_path.exists():
+                generated_files.append(str(file_path))
+
+    except ConfigurationError as e:
+        print(f"❌ Configuration error: {e}")
+        return 1
+    except TranslationError as e:
+        print(f"❌ Translation error: {e}")
+        return 1
+    except FileNotFoundError as e:
+        print(f"❌ File not found: {e}")
+        return 1
+    except Exception as e:
+        print(f"❌ Unexpected error: {e}")
+        return 1
+
+    return 0
 
 def main():
     """Main entry point."""
@@ -220,6 +340,8 @@ def main():
         return handle_show_chapters(args)
     elif args.mode == "translate":
         return handle_translate(args)
+    elif args.mode == "fix-chunks":
+        return handle_fix_chunks(args)
     else:
         parser.print_help()
         return 1
