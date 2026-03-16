@@ -24,17 +24,26 @@ func buildProjectDetail(p *model.Project) fyne.CanvasObject {
 	title := widget.NewLabel(p.Name)
 	title.TextStyle = fyne.TextStyle{Bold: true}
 
-	statusLabel := widget.NewLabel(fmt.Sprintf("Status: %s | %s -> %s", p.Status, p.SourceLang, p.TargetLang))
+	providerInfo := p.Provider
+	if p.ProviderURL != "" {
+		providerInfo += " @ " + p.ProviderURL
+	}
+	statusLabel := widget.NewLabel(fmt.Sprintf(
+		"Status: %s | %s→%s | %s | %s",
+		p.Status, p.SourceLang, p.TargetLang, p.ModelPath, providerInfo,
+	))
 
 	progressBar := widget.NewProgressBar()
 	progressBar.SetValue(pct)
 
-	progressLabel := widget.NewLabel(fmt.Sprintf("%d/%d completed, %d failed", completed, total, failed))
+	progressLabel := widget.NewLabel(fmt.Sprintf(
+		"%d/%d completed, %d failed", completed, total, failed,
+	))
 
 	logEntry := widget.NewMultiLineEntry()
 	logEntry.SetMinRowsVisible(6)
 	logEntry.Disable()
-	logEntry.SetPlaceHolder("Translation log will appear here...")
+	logEntry.SetPlaceHolder("Translation log will appear here…")
 
 	var mu sync.Mutex
 	var translating bool
@@ -49,32 +58,30 @@ func buildProjectDetail(p *model.Project) fyne.CanvasObject {
 		translating = true
 		mu.Unlock()
 
+		translateBtn.SetText("Translating…")
 		translateBtn.Disable()
 
-		var t *translator.Translator
-		if serverURL != "" {
-			t = translator.NewWithHTTP(appStore, serverURL)
-		} else {
-			t = translator.New(appStore)
-		}
+		t := translator.New(appStore)
 
 		go func() {
 			t.TranslateProject(p, func(e translator.ProgressEvent) {
 				switch e.EventType {
 				case translator.EventChunkStart:
-					appendLog(logEntry, fmt.Sprintf("[ch %d / chunk %d] translating...", e.ChapterIndex, e.ChunkIndex))
+					appendLog(logEntry, fmt.Sprintf("[ch %d / chunk %d] translating…", e.ChapterIndex, e.ChunkIndex))
 
 				case translator.EventToken:
-					// live speed updates handled via progress bar
+					// token streaming — could update a streaming label here
+
 				case translator.EventChunkDone:
 					progressBar.SetValue(e.TotalProgress)
-					c, t := p.Progress()
-					progressLabel.SetText(fmt.Sprintf("%d/%d completed, %d failed", c, t, p.FailedChunks()))
+					c, tot := p.Progress()
+					progressLabel.SetText(fmt.Sprintf(
+						"%d/%d completed, %d failed", c, tot, p.FailedChunks(),
+					))
 					appendLog(logEntry, fmt.Sprintf("  chunk done (%.0f%%)", e.TotalProgress*100))
 
 				case translator.EventChunkFailed:
 					appendLog(logEntry, fmt.Sprintf("  FAILED: %v", e.Error))
-					progressLabel.SetText(fmt.Sprintf("%d/%d completed, %d failed", completed, total, p.FailedChunks()))
 
 				case translator.EventChapterDone:
 					appendLog(logEntry, fmt.Sprintf("[chapter %d complete]", e.ChapterIndex))
@@ -87,6 +94,7 @@ func buildProjectDetail(p *model.Project) fyne.CanvasObject {
 			mu.Lock()
 			translating = false
 			mu.Unlock()
+			translateBtn.SetText("Translate All")
 			translateBtn.Enable()
 
 			reloaded, err := appStore.Load(p.ID)
@@ -96,9 +104,16 @@ func buildProjectDetail(p *model.Project) fyne.CanvasObject {
 		}()
 	}
 
-	exportBtn := widget.NewButton("Export", func() {
-		showExportDialog(p)
-	})
+	// Export button only shown once some translation has been done
+	var actionRow fyne.CanvasObject
+	if completed > 0 {
+		exportBtn := widget.NewButton("Export…", func() {
+			showExportDialog(p)
+		})
+		actionRow = container.NewHBox(translateBtn, exportBtn)
+	} else {
+		actionRow = container.NewHBox(translateBtn)
+	}
 
 	chapterList := buildChapterList(p)
 
@@ -107,11 +122,11 @@ func buildProjectDetail(p *model.Project) fyne.CanvasObject {
 		statusLabel,
 		progressBar,
 		progressLabel,
-		container.NewHBox(translateBtn, exportBtn),
+		actionRow,
 	)
 
 	logScroll := container.NewVScroll(logEntry)
-	logScroll.SetMinSize(fyne.NewSize(0, 150))
+	logScroll.SetMinSize(fyne.NewSize(0, 130))
 
 	return container.NewBorder(header, logScroll, nil, nil, chapterList)
 }
@@ -121,8 +136,8 @@ func buildChapterList(p *model.Project) fyne.CanvasObject {
 		func() int { return len(p.Chapters) },
 		func() fyne.CanvasObject {
 			return container.NewHBox(
-				widget.NewLabel("Chapter"),
-				widget.NewLabel("Progress"),
+				widget.NewLabel("Chapter title"),
+				widget.NewLabel("0/0"),
 			)
 		},
 		func(id widget.ListItemID, obj fyne.CanvasObject) {
@@ -153,7 +168,6 @@ func appendLog(entry *widget.Entry, text string) {
 		current += "\n"
 	}
 	entry.SetText(current + text)
-	entry.CursorRow = len([]rune(entry.Text))
 }
 
 func showExportDialog(p *model.Project) {
@@ -161,14 +175,18 @@ func showExportDialog(p *model.Project) {
 		[]string{model.FormatEPUB, model.FormatPDF, model.FormatMarkdown},
 		nil,
 	)
-	formatSelect.SetSelected(p.ExportFormat)
+	if p.ExportFormat != "" {
+		formatSelect.SetSelected(p.ExportFormat)
+	} else {
+		formatSelect.SetSelected(model.FormatEPUB)
+	}
 
 	outputEntry := widget.NewEntry()
-	outputEntry.SetPlaceHolder("Output path (auto if empty)")
+	outputEntry.SetPlaceHolder("Output path (auto-generated if empty)")
 
 	items := []*widget.FormItem{
 		{Text: "Format", Widget: formatSelect},
-		{Text: "Output", Widget: outputEntry},
+		{Text: "Output Path", Widget: outputEntry},
 	}
 
 	dialog.ShowForm("Export Project", "Export", "Cancel", items, func(ok bool) {
@@ -193,6 +211,10 @@ func showExportDialog(p *model.Project) {
 			return
 		}
 
-		dialog.ShowInformation("Export Complete", fmt.Sprintf("Exported to %s", output), mainWindow)
+		// Persist the chosen export format as the new default
+		p.ExportFormat = format
+		_ = appStore.Save(p)
+
+		dialog.ShowInformation("Export Complete", fmt.Sprintf("Exported to:\n%s", output), mainWindow)
 	}, mainWindow)
 }

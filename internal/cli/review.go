@@ -16,10 +16,9 @@ func init() {
 	f.Int("chapter", -1, "Chapter index to review")
 	f.Int("chunk", -1, "Chunk index to review (requires --chapter)")
 	f.Bool("retranslate", false, "Retranslate the specified chunk")
-	f.String("model", "", "Override model for retranslation")
+	f.String("model", "", "Override model name/path for retranslation")
 	f.String("thinking", "", "Override thinking mode for retranslation")
 	f.Int("thinking-budget", 0, "Override thinking budget for retranslation")
-	f.String("server", "", "HTTP server URL for dlgo")
 }
 
 var reviewCmd = &cobra.Command{
@@ -59,10 +58,6 @@ var reviewCmd = &cobra.Command{
 
 		if retranslate {
 			modelPath, _ := cmd.Flags().GetString("model")
-			if modelPath == "" {
-				modelPath = p.ModelPath
-			}
-
 			params := p.ModelParams
 			if t, _ := cmd.Flags().GetString("thinking"); t != "" {
 				params.ThinkingMode = t
@@ -71,17 +66,17 @@ var reviewCmd = &cobra.Command{
 				params.ThinkingBudget = b
 			}
 
-			server, _ := cmd.Flags().GetString("server")
-			var t *translator.Translator
-			if server != "" {
-				t = translator.NewWithHTTP(appStore, server)
-			} else {
-				t = translator.New(appStore)
-			}
+			t := translator.New(appStore)
 
-			fmt.Printf("\nRetranslating chunk %d with model %s...\n", chunkIdx, modelPath)
+			fmt.Printf("\nRetranslating chunk %d with model %q (provider: %s)...\n",
+				chunkIdx, func() string {
+					if modelPath != "" {
+						return modelPath
+					}
+					return p.ModelPath
+				}(), p.Provider)
 			cb := cliProgressCallback()
-			if err := t.RetranslateChunk(p, chapterIdx, chunkIdx, modelPath, params, cb); err != nil {
+			if err := t.RetranslateChunk(p, chapterIdx, chunkIdx, "", "", modelPath, params, cb); err != nil {
 				return err
 			}
 

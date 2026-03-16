@@ -14,7 +14,9 @@ import (
 func showReviewDialog(p *model.Project, chapterIdx, chunkIdx int) {
 	chunk := &p.Chapters[chapterIdx].Chunks[chunkIdx]
 
-	titleLabel := widget.NewLabel(fmt.Sprintf("Chapter %d, Chunk %d [%s]", chapterIdx, chunkIdx, chunk.Status))
+	titleLabel := widget.NewLabel(fmt.Sprintf(
+		"Chapter %d, Chunk %d  [%s]", chapterIdx, chunkIdx, chunk.Status,
+	))
 	titleLabel.TextStyle = fyne.TextStyle{Bold: true}
 
 	infoLabel := widget.NewLabel("")
@@ -30,6 +32,7 @@ func showReviewDialog(p *model.Project, chapterIdx, chunkIdx int) {
 	translatedEntry := widget.NewMultiLineEntry()
 	translatedEntry.SetText(chunk.TranslatedText)
 	translatedEntry.SetMinRowsVisible(10)
+	translatedEntry.SetPlaceHolder("No translation yet")
 
 	saveBtn := widget.NewButton("Save Edit", func() {
 		chunk.TranslatedText = translatedEntry.Text
@@ -40,11 +43,12 @@ func showReviewDialog(p *model.Project, chapterIdx, chunkIdx int) {
 			dialog.ShowError(err, mainWindow)
 			return
 		}
-		dialog.ShowInformation("Saved", "Translation updated", mainWindow)
+		dialog.ShowInformation("Saved", "Translation revision saved.", mainWindow)
 	})
 
+	// ── Retranslate controls ──────────────────────────────────────────────
 	modelOverride := widget.NewEntry()
-	modelOverride.SetText(p.ModelPath)
+	modelOverride.SetPlaceHolder(fmt.Sprintf("Default: %s", p.ModelPath))
 
 	thinkingSelect := widget.NewSelect(
 		[]string{model.ThinkingDisabled, model.ThinkingEnabled, model.ThinkingBudget},
@@ -52,32 +56,37 @@ func showReviewDialog(p *model.Project, chapterIdx, chunkIdx int) {
 	)
 	thinkingSelect.SetSelected(p.ModelParams.ThinkingMode)
 
+	streamingLabel := widget.NewLabel("")
+
 	retranslateBtn := widget.NewButton("Retranslate", func() {
 		params := p.ModelParams
 		params.ThinkingMode = thinkingSelect.Selected
+
 		modelPath := modelOverride.Text
-		if modelPath == "" {
-			modelPath = p.ModelPath
-		}
 
-		var t *translator.Translator
-		if serverURL != "" {
-			t = translator.NewWithHTTP(appStore, serverURL)
-		} else {
-			t = translator.New(appStore)
-		}
+		t := translator.New(appStore)
 
-		retranslateBtn := widget.NewButton("Retranslating...", nil)
-		retranslateBtn.Disable()
+		streamingLabel.SetText("Translating…")
+		translatedEntry.SetText("")
 
 		go func() {
-			err := t.RetranslateChunk(p, chapterIdx, chunkIdx, modelPath, params, func(e translator.ProgressEvent) {
-				if e.EventType == translator.EventToken {
-					translatedEntry.SetText(translatedEntry.Text + e.Token)
-				}
-			})
+			err := t.RetranslateChunk(
+				p, chapterIdx, chunkIdx,
+				"", "", modelPath,
+				params,
+				func(e translator.ProgressEvent) {
+					if e.EventType == translator.EventToken {
+						translatedEntry.SetText(translatedEntry.Text + e.Token)
+					}
+					if e.EventType == translator.EventChunkDone || e.EventType == translator.EventChunkFailed {
+						streamingLabel.SetText("")
+					}
+				},
+			)
 			if err != nil {
 				dialog.ShowError(err, mainWindow)
+				streamingLabel.SetText("")
+				return
 			}
 
 			reloaded, loadErr := appStore.Load(p.ID)
@@ -87,39 +96,36 @@ func showReviewDialog(p *model.Project, chapterIdx, chunkIdx int) {
 		}()
 	})
 
-	backBtn := widget.NewButton("Back", func() {
+	backBtn := widget.NewButton("← Back", func() {
 		showChapterView(p, chapterIdx)
 	})
 
+	// ── Layout ────────────────────────────────────────────────────────────
 	header := container.NewVBox(
 		container.NewHBox(backBtn, titleLabel),
 		infoLabel,
 	)
 
-	sourceSection := container.NewVBox(
-		widget.NewLabel("Source:"),
-		sourceEntry,
-	)
-
-	translatedSection := container.NewVBox(
+	sourceCol := container.NewVBox(widget.NewLabel("Source:"), sourceEntry)
+	translatedCol := container.NewVBox(
 		widget.NewLabel("Translation:"),
 		translatedEntry,
 		saveBtn,
 	)
 
 	retranslateSection := container.NewVBox(
-		widget.NewLabel("Retranslate:"),
-		widget.NewLabel("Model:"),
-		modelOverride,
-		widget.NewLabel("Thinking:"),
-		thinkingSelect,
-		retranslateBtn,
+		widget.NewSeparator(),
+		widget.NewLabel("Retranslate with overrides:"),
+		container.NewGridWithColumns(2,
+			widget.NewLabel("Model override:"), modelOverride,
+			widget.NewLabel("Thinking mode:"), thinkingSelect,
+		),
+		container.NewHBox(retranslateBtn, streamingLabel),
 	)
 
 	content := container.NewVBox(
 		header,
-		container.NewGridWithColumns(2, sourceSection, translatedSection),
-		widget.NewSeparator(),
+		container.NewGridWithColumns(2, sourceCol, translatedCol),
 		retranslateSection,
 	)
 
@@ -127,6 +133,6 @@ func showReviewDialog(p *model.Project, chapterIdx, chunkIdx int) {
 
 	projectList := buildProjectList()
 	split := container.NewHSplit(projectList, scroll)
-	split.SetOffset(0.3)
+	split.SetOffset(0.28)
 	mainWindow.SetContent(split)
 }

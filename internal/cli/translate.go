@@ -15,7 +15,6 @@ func init() {
 	f := translateCmd.Flags()
 	f.Int("chapter", -1, "Translate only this chapter index")
 	f.Int("chunk", -1, "Translate only this chunk index (requires --chapter)")
-	f.String("server", "", "HTTP server URL (e.g. http://localhost:8080)")
 }
 
 var translateCmd = &cobra.Command{
@@ -30,15 +29,8 @@ var translateCmd = &cobra.Command{
 
 		chapterIdx, _ := cmd.Flags().GetInt("chapter")
 		chunkIdx, _ := cmd.Flags().GetInt("chunk")
-		server, _ := cmd.Flags().GetString("server")
 
-		var t *translator.Translator
-		if server != "" {
-			t = translator.NewWithHTTP(appStore, server)
-		} else {
-			t = translator.New(appStore)
-		}
-
+		t := translator.New(appStore)
 		cb := cliProgressCallback()
 
 		if chapterIdx >= 0 && chunkIdx >= 0 {
@@ -52,7 +44,7 @@ var translateCmd = &cobra.Command{
 		}
 
 		completed, total := p.Progress()
-		fmt.Printf("Translating project %q (%d/%d done)...\n", p.Name, completed, total)
+		fmt.Printf("Translating project %q via %s (%d/%d done)...\n", p.Name, p.Provider, completed, total)
 		return t.TranslateProject(p, cb)
 	},
 }

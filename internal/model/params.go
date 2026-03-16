@@ -12,6 +12,13 @@ const (
 	FormatEPUB     = "epub"
 	FormatPDF      = "pdf"
 	FormatMarkdown = "md"
+
+	// ProviderOllama uses a locally running Ollama server (default http://localhost:11434).
+	ProviderOllama = "ollama"
+	// ProviderDlgoHTTP uses a running dlgo server via its OpenAI-compatible HTTP API.
+	ProviderDlgoHTTP = "dlgo-http"
+	// ProviderDlgo loads a GGUF file directly via the dlgo library (Linux only).
+	ProviderDlgo = "dlgo"
 )
 
 type ModelParams struct {

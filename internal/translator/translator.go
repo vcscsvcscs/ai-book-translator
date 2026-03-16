@@ -11,49 +11,25 @@ import (
 	"github.com/vcscsvcscs/ai-book-translator/internal/store"
 )
 
-type BackendType string
-
-const (
-	BackendDlgo BackendType = "dlgo"
-	BackendHTTP BackendType = "http"
-)
-
 type Translator struct {
 	store      *store.Store
 	backends   map[string]LLMBackend
 	backendsMu sync.Mutex
-	httpURL    string
-	backend    BackendType
 }
 
 func New(s *store.Store) *Translator {
 	return &Translator{
 		store:    s,
 		backends: make(map[string]LLMBackend),
-		backend:  BackendDlgo,
 	}
 }
 
-func NewWithHTTP(s *store.Store, serverURL string) *Translator {
-	return &Translator{
-		store:    s,
-		backends: make(map[string]LLMBackend),
-		httpURL:  serverURL,
-		backend:  BackendHTTP,
-	}
-}
+// getBackend returns (or lazily creates) a cached backend keyed by provider+URL+model.
+func (t *Translator) getBackend(provider, providerURL, modelPath string) (LLMBackend, error) {
+	key := provider + "|" + providerURL + "|" + modelPath
 
-func (t *Translator) getBackend(modelPath string) (LLMBackend, error) {
 	t.backendsMu.Lock()
 	defer t.backendsMu.Unlock()
-
-	key := modelPath
-	if t.backend == BackendDlgo {
-		absPath, err := filepath.Abs(modelPath)
-		if err == nil {
-			key = absPath
-		}
-	}
 
 	if b, ok := t.backends[key]; ok {
 		return b, nil
@@ -62,11 +38,14 @@ func (t *Translator) getBackend(modelPath string) (LLMBackend, error) {
 	var b LLMBackend
 	var err error
 
-	switch t.backend {
-	case BackendHTTP:
-		b = NewHTTPBackend(t.httpURL, filepath.Base(modelPath))
-	default:
-		b, err = NewDlgoBackend(key)
+	switch provider {
+	case model.ProviderOllama:
+		b = NewOllamaBackend(providerURL, modelPath)
+	case model.ProviderDlgoHTTP:
+		b = NewHTTPBackend(providerURL, modelPath)
+	default: // model.ProviderDlgo
+		absPath, _ := filepath.Abs(modelPath)
+		b, err = NewDlgoBackend(absPath)
 		if err != nil {
 			return nil, err
 		}
@@ -92,7 +71,7 @@ func (t *Translator) TranslateProject(p *model.Project, onProgress ProgressCallb
 				continue
 			}
 
-			err := t.translateChunk(p, ci, ki, p.ModelPath, p.ModelParams, onProgress, completed, total)
+			err := t.translateChunk(p, ci, ki, p.Provider, p.ProviderURL, p.ModelPath, p.ModelParams, onProgress, completed, total)
 			if err == nil {
 				completed++
 			}
@@ -157,7 +136,7 @@ func (t *Translator) TranslateChapter(p *model.Project, chapterIdx int, onProgre
 		if chunk.Status == model.ChunkCompleted || chunk.Status == model.ChunkRevised {
 			continue
 		}
-		err := t.translateChunk(p, chapterIdx, ki, p.ModelPath, p.ModelParams, onProgress, completed, total)
+		err := t.translateChunk(p, chapterIdx, ki, p.Provider, p.ProviderURL, p.ModelPath, p.ModelParams, onProgress, completed, total)
 		if err == nil {
 			completed++
 		}
@@ -176,10 +155,18 @@ func (t *Translator) TranslateSingleChunk(p *model.Project, chapterIdx, chunkIdx
 	}
 
 	completed, total := p.Progress()
-	return t.translateChunk(p, chapterIdx, chunkIdx, p.ModelPath, p.ModelParams, onProgress, completed, total)
+	return t.translateChunk(p, chapterIdx, chunkIdx, p.Provider, p.ProviderURL, p.ModelPath, p.ModelParams, onProgress, completed, total)
 }
 
-func (t *Translator) RetranslateChunk(p *model.Project, chapterIdx, chunkIdx int, modelPath string, params model.ModelParams, onProgress ProgressCallback) error {
+// RetranslateChunk retranslates a specific chunk, optionally overriding model and params.
+// Pass empty strings for provider/providerURL/modelPath to inherit from the project.
+func (t *Translator) RetranslateChunk(
+	p *model.Project,
+	chapterIdx, chunkIdx int,
+	provider, providerURL, modelPath string,
+	params model.ModelParams,
+	onProgress ProgressCallback,
+) error {
 	if chapterIdx < 0 || chapterIdx >= len(p.Chapters) {
 		return fmt.Errorf("chapter index %d out of range", chapterIdx)
 	}
@@ -188,18 +175,28 @@ func (t *Translator) RetranslateChunk(p *model.Project, chapterIdx, chunkIdx int
 		return fmt.Errorf("chunk index %d out of range", chunkIdx)
 	}
 
+	if provider == "" {
+		provider = p.Provider
+	}
+	if providerURL == "" {
+		providerURL = p.ProviderURL
+	}
+	if modelPath == "" {
+		modelPath = p.ModelPath
+	}
+
 	ch.Chunks[chunkIdx].Status = model.ChunkPending
 	ch.Chunks[chunkIdx].TranslatedText = ""
 	ch.Chunks[chunkIdx].ErrorMessage = ""
 
 	completed, total := p.Progress()
-	return t.translateChunk(p, chapterIdx, chunkIdx, modelPath, params, onProgress, completed, total)
+	return t.translateChunk(p, chapterIdx, chunkIdx, provider, providerURL, modelPath, params, onProgress, completed, total)
 }
 
 func (t *Translator) translateChunk(
 	p *model.Project,
 	chapterIdx, chunkIdx int,
-	modelPath string,
+	provider, providerURL, modelPath string,
 	params model.ModelParams,
 	onProgress ProgressCallback,
 	completed, total int,
@@ -219,7 +216,7 @@ func (t *Translator) translateChunk(
 		})
 	}
 
-	backend, err := t.getBackend(modelPath)
+	backend, err := t.getBackend(provider, providerURL, modelPath)
 	if err != nil {
 		chunk.Status = model.ChunkFailed
 		chunk.ErrorMessage = err.Error()
@@ -259,7 +256,6 @@ func (t *Translator) translateChunk(
 			if elapsed > 0 {
 				tokPerSec = float64(tokenCount) / elapsed
 			}
-
 			onProgress(ProgressEvent{
 				ProjectID:    p.ID,
 				ChapterIndex: chapterIdx,
@@ -276,7 +272,6 @@ func (t *Translator) translateChunk(
 		chunk.ErrorMessage = err.Error()
 		chunk.TranslatedAt = time.Now()
 		_ = t.store.Save(p)
-
 		if onProgress != nil {
 			onProgress(ProgressEvent{
 				ProjectID:    p.ID,
@@ -294,9 +289,16 @@ func (t *Translator) translateChunk(
 		translated = StripThinkingTags(translated)
 	}
 
+	displayModel := modelPath
+	if provider == model.ProviderOllama || provider == model.ProviderDlgoHTTP {
+		displayModel = modelPath
+	} else {
+		displayModel = filepath.Base(modelPath)
+	}
+
 	chunk.TranslatedText = translated
 	chunk.Status = model.ChunkCompleted
-	chunk.ModelUsed = filepath.Base(modelPath)
+	chunk.ModelUsed = displayModel
 	chunk.ErrorMessage = ""
 	chunk.TranslatedAt = time.Now()
 	_ = t.store.Save(p)

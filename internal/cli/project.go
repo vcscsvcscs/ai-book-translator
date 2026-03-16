@@ -24,18 +24,19 @@ func init() {
 	f := projectCreateCmd.Flags()
 	f.String("name", "", "Project name")
 	f.String("input", "", "Input file path (epub, pdf, or md)")
-	f.String("model", "", "Path to GGUF model file")
+	f.String("model", "", "Model name (Ollama) or path to .gguf file (dlgo)")
 	f.String("from", "", "Source language")
 	f.String("to", "", "Target language")
 	f.String("style", "", "Extra style prompt for translation")
 	f.Int("chunk-size", chunker.DefaultMaxSize, "Max chunk size (approx tokens)")
 	f.String("chunk-strategy", model.ChunkStrategyParagraph, "Chunking strategy: paragraph, sentences, tokens")
-	f.String("export-format", model.FormatEPUB, "Export format: epub, pdf, md")
+	f.String("export-format", model.FormatEPUB, "Default export format: epub, pdf, md")
 	f.Float32("temperature", 0.3, "Sampling temperature")
 	f.Int("max-tokens", 2048, "Max tokens per response")
 	f.String("thinking", model.ThinkingDisabled, "Thinking mode: disabled, enabled, budget")
 	f.Int("thinking-budget", 0, "Thinking token budget (with --thinking=budget)")
-	f.String("server", "", "HTTP server URL for dlgo (e.g. http://localhost:8080)")
+	f.String("provider", model.ProviderOllama, "Inference provider: ollama, dlgo-http, dlgo")
+	f.String("provider-url", "", "Provider server URL (default: http://localhost:11434 for ollama)")
 }
 
 var projectCmd = &cobra.Command{
@@ -60,6 +61,8 @@ var projectCreateCmd = &cobra.Command{
 		maxTokens, _ := cmd.Flags().GetInt("max-tokens")
 		thinking, _ := cmd.Flags().GetString("thinking")
 		thinkingBudget, _ := cmd.Flags().GetInt("thinking-budget")
+		provider, _ := cmd.Flags().GetString("provider")
+		providerURL, _ := cmd.Flags().GetString("provider-url")
 
 		if input == "" {
 			return fmt.Errorf("--input is required")
@@ -69,6 +72,18 @@ var projectCreateCmd = &cobra.Command{
 		}
 		if fromLang == "" || toLang == "" {
 			return fmt.Errorf("--from and --to are required")
+		}
+
+		if provider == "" {
+			provider = cfg.Provider
+		}
+		if providerURL == "" {
+			switch provider {
+			case model.ProviderOllama:
+				providerURL = cfg.OllamaURL
+			case model.ProviderDlgoHTTP:
+				providerURL = cfg.DlgoURL
+			}
 		}
 
 		if name == "" {
@@ -119,6 +134,8 @@ var projectCreateCmd = &cobra.Command{
 			Name:          name,
 			SourceFile:    input,
 			SourceFormat:  sourceFormat,
+			Provider:      provider,
+			ProviderURL:   providerURL,
 			ModelPath:     modelPath,
 			SourceLang:    fromLang,
 			TargetLang:    toLang,
@@ -218,6 +235,11 @@ var projectShowCmd = &cobra.Command{
 		fmt.Printf("  Status:        %s\n", p.Status)
 		fmt.Printf("  Source:        %s (%s)\n", filepath.Base(p.SourceFile), p.SourceFormat)
 		fmt.Printf("  Languages:     %s -> %s\n", p.SourceLang, p.TargetLang)
+		fmt.Printf("  Provider:      %s", p.Provider)
+		if p.ProviderURL != "" {
+			fmt.Printf(" (%s)", p.ProviderURL)
+		}
+		fmt.Println()
 		fmt.Printf("  Model:         %s\n", p.ModelPath)
 		fmt.Printf("  Thinking:      %s", p.ModelParams.ThinkingMode)
 		if p.ModelParams.ThinkingMode == model.ThinkingBudget {

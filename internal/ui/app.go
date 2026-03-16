@@ -11,20 +11,18 @@ import (
 )
 
 var (
-	appConfig   *config.Config
-	appStore    *store.Store
-	serverURL   string
-	mainWindow  fyne.Window
+	appConfig  *config.Config
+	appStore   *store.Store
+	mainWindow fyne.Window
 )
 
-func Run(cfg *config.Config, s *store.Store, server string) {
+func Run(cfg *config.Config, s *store.Store) {
 	appConfig = cfg
 	appStore = s
-	serverURL = server
 
-	a := app.New()
+	a := app.NewWithID("com.vcscsvcscs.ai-book-translator")
 	mainWindow = a.NewWindow("AI Book Translator")
-	mainWindow.Resize(fyne.NewSize(1024, 700))
+	mainWindow.Resize(fyne.NewSize(1100, 720))
 
 	content := buildMainLayout()
 	mainWindow.SetContent(content)
@@ -33,10 +31,10 @@ func Run(cfg *config.Config, s *store.Store, server string) {
 
 func buildMainLayout() fyne.CanvasObject {
 	projectList := buildProjectList()
-	detail := widget.NewLabel("Select a project or create a new one")
+	detail := widget.NewLabel("Select a project from the list, or create a new one.")
 
 	split := container.NewHSplit(projectList, detail)
-	split.SetOffset(0.3)
+	split.SetOffset(0.28)
 
 	return split
 }

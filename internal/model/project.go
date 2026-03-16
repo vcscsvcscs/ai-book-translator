@@ -20,6 +20,11 @@ type Project struct {
 	Name          string      `json:"name"`
 	SourceFile    string      `json:"source_file"`
 	SourceFormat  string      `json:"source_format"`
+	// Provider is the inference backend: "ollama", "dlgo-http", or "dlgo".
+	Provider    string `json:"provider"`
+	// ProviderURL is the server URL for ollama or dlgo-http backends.
+	ProviderURL string `json:"provider_url"`
+	// ModelPath is the model name (Ollama) or file path (dlgo/dlgo-http).
 	ModelPath     string      `json:"model_path"`
 	SourceLang    string      `json:"source_lang"`
 	TargetLang    string      `json:"target_lang"`

@@ -10,11 +10,18 @@ import (
 	"path"
 	"strings"
 
-	epub "github.com/mathieu-keller/epub-parser/v2"
 	"golang.org/x/net/html"
 )
 
 type EPUBParser struct{}
+
+type containerXML struct {
+	XMLName   xml.Name `xml:"container"`
+	Rootfiles []struct {
+		FullPath  string `xml:"full-path,attr"`
+		MediaType string `xml:"media-type,attr"`
+	} `xml:"rootfiles>rootfile"`
+}
 
 type opfPackage struct {
 	XMLName  xml.Name    `xml:"package"`
@@ -56,13 +63,20 @@ func (p *EPUBParser) Parse(filePath string) ([]ParsedChapter, error) {
 		return nil, fmt.Errorf("open epub zip: %w", err)
 	}
 
-	book, err := epub.OpenBook(zipReader)
+	containerData, err := readZipFile(zipReader, "META-INF/container.xml")
 	if err != nil {
-		return nil, fmt.Errorf("parse epub metadata: %w", err)
+		return nil, fmt.Errorf("read epub container.xml: %w", err)
 	}
-	_ = book
 
-	rootFile := book.Container.Rootfile.Path
+	var container containerXML
+	if err := xml.Unmarshal(containerData, &container); err != nil {
+		return nil, fmt.Errorf("parse epub container.xml: %w", err)
+	}
+	if len(container.Rootfiles) == 0 {
+		return nil, fmt.Errorf("no rootfile found in epub container.xml")
+	}
+
+	rootFile := container.Rootfiles[0].FullPath
 	rootDir := path.Dir(rootFile)
 
 	opfData, err := readZipFile(zipReader, rootFile)

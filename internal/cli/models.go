@@ -7,21 +7,25 @@ import (
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
+	"github.com/vcscsvcscs/ai-book-translator/internal/translator"
 )
 
 func init() {
 	rootCmd.AddCommand(modelsCmd)
 	modelsCmd.AddCommand(modelsListCmd)
+	modelsCmd.AddCommand(modelsListOllamaCmd)
+
+	modelsListOllamaCmd.Flags().String("url", "", "Ollama server URL (default: from config)")
 }
 
 var modelsCmd = &cobra.Command{
 	Use:   "models",
-	Short: "Manage GGUF models",
+	Short: "Manage and list available models",
 }
 
 var modelsListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List available GGUF models in the models directory",
+	Short: "List local GGUF model files in the models directory",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dir := cfg.ModelsDir
 		fmt.Printf("Models directory: %s\n\n", dir)
@@ -60,6 +64,36 @@ var modelsListCmd = &cobra.Command{
 			}
 			size := formatSize(info.Size())
 			fmt.Fprintf(w, "%s\t%s\t%s\n", m.Name(), size, filepath.Join(dir, m.Name()))
+		}
+		return w.Flush()
+	},
+}
+
+var modelsListOllamaCmd = &cobra.Command{
+	Use:   "list-ollama",
+	Short: "List models available from a running Ollama server",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		url, _ := cmd.Flags().GetString("url")
+		if url == "" {
+			url = cfg.OllamaURL
+		}
+
+		fmt.Printf("Querying Ollama at %s...\n\n", url)
+
+		models, err := translator.ListOllamaModels(url)
+		if err != nil {
+			return fmt.Errorf("list ollama models: %w", err)
+		}
+
+		if len(models) == 0 {
+			fmt.Println("No models found in Ollama. Pull one with: ollama pull qwen3.5:9b")
+			return nil
+		}
+
+		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+		fmt.Fprintln(w, "#\tMODEL NAME")
+		for i, name := range models {
+			fmt.Fprintf(w, "%d\t%s\n", i+1, name)
 		}
 		return w.Flush()
 	},

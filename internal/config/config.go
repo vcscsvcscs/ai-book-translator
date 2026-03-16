@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/viper"
+	"github.com/vcscsvcscs/ai-book-translator/internal/model"
 )
 
 const (
@@ -14,8 +15,11 @@ const (
 )
 
 type Config struct {
-	ModelsDir string `mapstructure:"models_dir"`
-	DataDir   string `mapstructure:"data_dir"`
+	ModelsDir   string `mapstructure:"models_dir"`
+	DataDir     string `mapstructure:"data_dir"`
+	Provider    string `mapstructure:"provider"`
+	OllamaURL   string `mapstructure:"ollama_url"`
+	DlgoURL     string `mapstructure:"dlgo_url"`
 }
 
 func defaultDir() string {
@@ -31,6 +35,9 @@ func Load() (*Config, error) {
 
 	viper.SetDefault("models_dir", filepath.Join(base, "models"))
 	viper.SetDefault("data_dir", filepath.Join(base, "projects"))
+	viper.SetDefault("provider", model.ProviderOllama)
+	viper.SetDefault("ollama_url", "http://localhost:11434")
+	viper.SetDefault("dlgo_url", "http://localhost:8080")
 
 	viper.SetConfigName(ConfigName)
 	viper.SetConfigType(ConfigType)
