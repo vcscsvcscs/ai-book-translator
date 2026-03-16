@@ -15,5 +15,7 @@ type LLMOptions struct {
 	MinP              float32
 	PresencePenalty   float32
 	RepetitionPenalty float32
-	ThinkingMode      string // model.ThinkingDisabled / Enabled / Budget
+	ThinkingMode      string   // model.ThinkingDisabled / Enabled / Budget
+	Stop              []string // Stop sequences to prevent over-generation
+	Seed              int      // Deterministic seed for reproducibility
 }

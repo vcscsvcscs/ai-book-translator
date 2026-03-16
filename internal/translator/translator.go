@@ -295,14 +295,16 @@ func (t *Translator) translateChunk(
 	inThink := false
 
 	opts := LLMOptions{
-		MaxTokens:         params.MaxTokens,
-		Temperature:       params.Temperature,
-		TopK:              params.TopK,
-		TopP:              params.TopP,
+		MaxTokens:         computeMaxOutputTokens(len(chunk.SourceText), p.MaxContextTokens),
+		Temperature:       applyDefault(params.Temperature, 0.2),
+		TopK:              applyDefaultInt(params.TopK, 40),
+		TopP:              applyDefault(params.TopP, 0.9),
 		MinP:              params.MinP,
 		PresencePenalty:   params.PresencePenalty,
-		RepetitionPenalty: params.RepetitionPenalty,
+		RepetitionPenalty: applyDefault(params.RepetitionPenalty, 1.1),
 		ThinkingMode:      params.ThinkingMode,
+		Stop:              []string{"\n\nText:", "<|im_end|>"},
+		Seed:              42,
 	}
 
 	userMsg := BuildUserMessage(p.SourceLang, p.TargetLang, chunk.SourceText, p.GenreContext)
@@ -402,4 +404,37 @@ func safeDiv(a, b float64) float64 {
 		return 0
 	}
 	return a / b
+}
+
+// applyDefault returns defaultValue if value is zero, otherwise returns value.
+func applyDefault(value, defaultValue float32) float32 {
+	if value == 0 {
+		return defaultValue
+	}
+	return value
+}
+
+// applyDefaultInt returns defaultValue if value is zero, otherwise returns value.
+func applyDefaultInt(value, defaultValue int) int {
+	if value == 0 {
+		return defaultValue
+	}
+	return value
+}
+
+// computeMaxOutputTokens calculates the maximum output tokens based on chunk size and context window.
+// It reserves 1500 tokens for prompts and overhead, ensuring the total stays within maxContext.
+func computeMaxOutputTokens(chunkTokens int, maxContext int) int {
+	const reserved = 1500 // For system prompt, user prompt, and overhead
+	
+	if maxContext == 0 {
+		maxContext = 32000 // Default context size
+	}
+	
+	available := maxContext - chunkTokens - reserved
+	if available < 512 {
+		return 512 // Minimum safe output size
+	}
+	
+	return available
 }

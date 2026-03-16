@@ -21,16 +21,16 @@
   - [x] 3.3 Implement genre context injection before "Text:" section
   - [x] 3.4 Test with and without genre context
 
-- [ ] 4. Implement Sampling Defaults
-  - [ ] 4.1 Create applyDefault() helper function for float32
-  - [ ] 4.2 Create applyDefaultInt() helper function for int
-  - [ ] 4.3 Create computeMaxOutputTokens() helper function
-  - [ ] 4.4 Update translateChunk() to apply defaults when constructing LLMOptions
-  - [ ] 4.5 Add default stop tokens: ["\n\nText:", "<|im_end|>"]
-  - [ ] 4.6 Add default seed: 42
-  - [ ] 4.7 Test default application with zero-value ModelParams
-  - [ ] 4.8 Test that non-zero values are not overridden
-  - [ ] 4.9 Test computeMaxOutputTokens() with various chunk sizes
+- [x] 4. Implement Sampling Defaults
+  - [x] 4.1 Create applyDefault() helper function for float32
+  - [x] 4.2 Create applyDefaultInt() helper function for int
+  - [x] 4.3 Create computeMaxOutputTokens() helper function
+  - [x] 4.4 Update translateChunk() to apply defaults when constructing LLMOptions
+  - [x] 4.5 Add default stop tokens: ["\n\nText:", "<|im_end|>"]
+  - [x] 4.6 Add default seed: 42
+  - [x] 4.7 Test default application with zero-value ModelParams
+  - [x] 4.8 Test that non-zero values are not overridden
+  - [x] 4.9 Test computeMaxOutputTokens() with various chunk sizes
 
 - [ ] 5. Add Chunk Size Validation
   - [ ] 5.1 Update validateChunkSize() function to accept maxContext parameter
