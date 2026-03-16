@@ -30,6 +30,7 @@ type chatRequest struct {
 	Messages []chatMessage `json:"messages"`
 	Stream   bool          `json:"stream"`
 	Stop     []string      `json:"stop,omitempty"`
+	Seed     int           `json:"seed,omitempty"`
 	// Top-level OpenAI-compatible fields
 	Temperature       float32  `json:"temperature,omitempty"`
 	MaxTokens         int      `json:"max_tokens,omitempty"`
@@ -75,11 +76,18 @@ func (h *httpBackend) ChatStream(ctx context.Context, system, user string, onTok
 	thinkingOn := opts.ThinkingMode == "enabled" || opts.ThinkingMode == "budget"
 	thinkingFlag := &thinkingOn
 
+	// Use Stop tokens from opts, fallback to defaults if empty
+	stopTokens := opts.Stop
+	if len(stopTokens) == 0 {
+		stopTokens = []string{"<|endoftext|>", "<|im_end|>"}
+	}
+
 	reqBody := chatRequest{
 		Model:             h.model,
 		Messages:          messages,
 		Stream:            true,
-		Stop:              []string{"<|endoftext|>", "<|im_end|>"},
+		Stop:              stopTokens,
+		Seed:              opts.Seed,
 		Temperature:       opts.Temperature,
 		MaxTokens:         opts.MaxTokens,
 		TopP:              opts.TopP,

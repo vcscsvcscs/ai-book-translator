@@ -22,6 +22,8 @@ func NewDlgoBackend(modelPath string) (LLMBackend, error) {
 }
 
 func (d *dlgoBackend) ChatStream(_ context.Context, system, user string, onToken func(string), opts LLMOptions) error {
+	// Note: dlgo backend does not support Stop tokens or Seed parameters.
+	// These features are gracefully ignored for this backend.
 	dlgoOpts := []dlgo.Option{
 		dlgo.WithMaxTokens(opts.MaxTokens),
 		dlgo.WithTemperature(opts.Temperature),

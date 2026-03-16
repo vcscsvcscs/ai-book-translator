@@ -65,12 +65,12 @@
   - [x] 8.3 Update all LLMOptions construction sites
   - [x] 8.4 Test backward compatibility
 
-- [ ] 9. Update LLM Backend Implementations
-  - [ ] 9.1 Update Ollama backend to pass Stop and Seed
-  - [ ] 9.2 Update HTTP backend to pass Stop and Seed
-  - [ ] 9.3 Update dlgo backend to pass Stop and Seed (if supported)
-  - [ ] 9.4 Handle backends that don't support these features gracefully
-  - [ ] 9.5 Test with each backend
+- [x] 9. Update LLM Backend Implementations
+  - [x] 9.1 Update Ollama backend to pass Stop and Seed
+  - [x] 9.2 Update HTTP backend to pass Stop and Seed
+  - [x] 9.3 Update dlgo backend to pass Stop and Seed (if supported)
+  - [x] 9.4 Handle backends that don't support these features gracefully
+  - [x] 9.5 Test with each backend
 
 - [ ] 10. Testing
   - [ ] 10.1 Write unit tests for BuildSystemPrompt()
