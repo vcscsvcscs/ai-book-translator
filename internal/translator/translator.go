@@ -57,6 +57,9 @@ func (t *Translator) getBackend(provider, providerURL, modelPath string) (LLMBac
 }
 
 func (t *Translator) TranslateProject(p *model.Project, onProgress ProgressCallback) error {
+	// Validate chunk size against context window
+	validateChunkSize(p.ChunkMaxSize, p.MaxContextTokens)
+	
 	p.Status = model.StatusTranslating
 	p.UpdatedAt = time.Now()
 	if err := t.store.Save(p); err != nil {
@@ -372,6 +375,20 @@ func (t *Translator) translateChunk(
 
 	translated := StripThinkingTags(result.String())
 
+	// Optional polish pass to improve fluency while preserving meaning
+	if p.EnablePolishPass {
+		polished, err := t.polishTranslation(
+			ctx, backend, translated, p.TargetLang, opts,
+			onProgress, p, chapterIdx, chunkIdx,
+		)
+		if err != nil {
+			// Log error but use initial translation as fallback
+			fmt.Printf("Polish pass failed: %v, using initial translation\n", err)
+		} else {
+			translated = polished
+		}
+	}
+
 	displayModel := modelPath
 	if provider == model.ProviderOllama || provider == model.ProviderDlgoHTTP {
 		displayModel = modelPath
@@ -397,6 +414,93 @@ func (t *Translator) translateChunk(
 	}
 
 	return nil
+}
+
+// polishTranslation performs a second pass to improve fluency while preserving meaning.
+// It uses strict rules to prevent summarization and ensure the exact meaning is preserved.
+func (t *Translator) polishTranslation(
+	ctx context.Context,
+	backend LLMBackend,
+	initialTranslation string,
+	targetLang string,
+	opts LLMOptions,
+	onProgress ProgressCallback,
+	p *model.Project,
+	chapterIdx, chunkIdx int,
+) (string, error) {
+	tgtName := model.GetLanguageName(targetLang)
+	
+	// Polish system prompt emphasizes editing without changing meaning
+	systemPrompt := fmt.Sprintf(
+		"You are a professional editor improving %s translations.\n"+
+		"Your task is to enhance fluency while preserving exact meaning.\n"+
+		"Do not add or remove any information.",
+		tgtName,
+	)
+	
+	// Polish user prompt with strict rules to prevent summarization
+	userPrompt := "Edit the following translation to improve fluency.\n\n" +
+		"Rules:\n" +
+		"- Preserve the exact meaning.\n" +
+		"- Do not add or remove information.\n" +
+		"- Do not shorten the text.\n" +
+		"- Do not summarize.\n" +
+		"- Only improve grammar and readability.\n\n" +
+		"Translation:\n" +
+		initialTranslation
+	
+	var result strings.Builder
+	tokenCount := 0
+	startTime := time.Now()
+	inThink := false
+	
+	// Preserve streaming behavior identical to main translation
+	err := backend.ChatStream(ctx, systemPrompt, userPrompt, func(token string) {
+		result.WriteString(token)
+		tokenCount++
+		
+		// Same thinking tag logic as main translation
+		combined := result.String()
+		openIdx := strings.LastIndex(combined, "<think>")
+		closeIdx := strings.LastIndex(combined, "</think>")
+		wasThinking := inThink
+		inThink = openIdx != -1 && (closeIdx == -1 || closeIdx < openIdx)
+		
+		trimmed := strings.TrimRight(token, " \t")
+		if trimmed == "<think>" || trimmed == "</think>" {
+			return
+		}
+		
+		if wasThinking && !inThink {
+			token = strings.TrimSuffix(token, "</think>")
+			if token == "" {
+				return
+			}
+		}
+		
+		if onProgress != nil {
+			elapsed := time.Since(startTime).Seconds()
+			tokPerSec := 0.0
+			if elapsed > 0 {
+				tokPerSec = float64(tokenCount) / elapsed
+			}
+			onProgress(ProgressEvent{
+				ProjectID:    p.ID,
+				ChapterIndex: chapterIdx,
+				ChunkIndex:   chunkIdx,
+				EventType:    EventToken,
+				Token:        token,
+				IsThinking:   inThink,
+				TokensPerSec: tokPerSec,
+			})
+		}
+	}, opts)
+	
+	if err != nil {
+		return "", err
+	}
+	
+	return StripThinkingTags(result.String()), nil
 }
 
 func safeDiv(a, b float64) float64 {
@@ -437,4 +541,23 @@ func computeMaxOutputTokens(chunkTokens int, maxContext int) int {
 	}
 	
 	return available
+}
+
+// validateChunkSize logs warnings for suboptimal chunk configurations.
+// Small chunks reduce translation quality by limiting context.
+// Large chunks may exceed safe context window limits.
+func validateChunkSize(chunkSize int, maxContext int) {
+	const recommendedMinTokens = 400
+	
+	if maxContext == 0 {
+		maxContext = 32000 // Default context size
+	}
+	
+	if chunkSize > 0 && chunkSize < recommendedMinTokens {
+		fmt.Printf("Warning: chunk size below recommended translation length (%d tokens)\n", recommendedMinTokens)
+	}
+	
+	if chunkSize > maxContext/2 {
+		fmt.Printf("Warning: chunk size may exceed safe context window (chunk: %d, max context: %d)\n", chunkSize, maxContext)
+	}
 }

@@ -32,32 +32,32 @@
   - [x] 4.8 Test that non-zero values are not overridden
   - [x] 4.9 Test computeMaxOutputTokens() with various chunk sizes
 
-- [ ] 5. Add Chunk Size Validation
-  - [ ] 5.1 Update validateChunkSize() function to accept maxContext parameter
-  - [ ] 5.2 Add warning for chunks below 400 tokens
-  - [ ] 5.3 Add warning for chunks exceeding maxContext/2
-  - [ ] 5.4 Integrate validation into TranslateProject()
-  - [ ] 5.5 Test warning appears for chunks below 400 tokens
-  - [ ] 5.6 Test warning appears for chunks exceeding context window
-  - [ ] 5.7 Test no warning for appropriately sized chunks
+- [x] 5. Add Chunk Size Validation
+  - [x] 5.1 Update validateChunkSize() function to accept maxContext parameter
+  - [x] 5.2 Add warning for chunks below 400 tokens
+  - [x] 5.3 Add warning for chunks exceeding maxContext/2
+  - [x] 5.4 Integrate validation into TranslateProject()
+  - [x] 5.5 Test warning appears for chunks below 400 tokens
+  - [x] 5.6 Test warning appears for chunks exceeding context window
+  - [x] 5.7 Test no warning for appropriately sized chunks
 
-- [ ] 6. Implement Two-Pass Translation
-  - [ ] 6.1 Create polishTranslation() function
-  - [ ] 6.2 Implement polish system prompt
-  - [ ] 6.3 Implement improved polish user prompt with strict rules
-  - [ ] 6.4 Preserve streaming behavior in polish pass
-  - [ ] 6.5 Integrate polish pass into translateChunk()
-  - [ ] 6.6 Add error handling with fallback to initial translation
-  - [ ] 6.7 Test two-pass flow with EnablePolishPass enabled
-  - [ ] 6.8 Test single-pass flow with EnablePolishPass disabled
-  - [ ] 6.9 Verify polish prompt prevents summarization
+- [x] 6. Implement Two-Pass Translation
+  - [x] 6.1 Create polishTranslation() function
+  - [x] 6.2 Implement polish system prompt
+  - [x] 6.3 Implement improved polish user prompt with strict rules
+  - [x] 6.4 Preserve streaming behavior in polish pass
+  - [x] 6.5 Integrate polish pass into translateChunk()
+  - [x] 6.6 Add error handling with fallback to initial translation
+  - [x] 6.7 Test two-pass flow with EnablePolishPass enabled
+  - [x] 6.8 Test single-pass flow with EnablePolishPass disabled
+  - [x] 6.9 Verify polish prompt prevents summarization
 
-- [ ] 7. Update translateChunk() Integration
-  - [ ] 7.1 Pass GenreContext to BuildUserMessage()
-  - [ ] 7.2 Apply sampling defaults before backend.ChatStream()
-  - [ ] 7.3 Use computeMaxOutputTokens() for dynamic token limits
-  - [ ] 7.4 Conditionally call polishTranslation() based on EnablePolishPass
-  - [ ] 7.5 Ensure all existing functionality preserved
+- [-] 7. Update translateChunk() Integration
+  - [x] 7.1 Pass GenreContext to BuildUserMessage()
+  - [x] 7.2 Apply sampling defaults before backend.ChatStream()
+  - [x] 7.3 Use computeMaxOutputTokens() for dynamic token limits
+  - [x] 7.4 Conditionally call polishTranslation() based on EnablePolishPass
+  - [-] 7.5 Ensure all existing functionality preserved
 
 - [ ] 8. Extend LLMOptions Structure
   - [ ] 8.1 Add Stop []string field to LLMOptions
