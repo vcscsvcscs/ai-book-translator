@@ -37,11 +37,29 @@ func BuildSystemPrompt(sourceLang, targetLang, stylePrompt string) string {
 	return sb.String()
 }
 
-// BuildUserMessage wraps the source text for translation.
-func BuildUserMessage(sourceLang, targetLang, text string) string {
+// BuildUserMessage wraps the source text for translation with faithful translation instructions.
+// If genreContext is provided, it will be injected before the "Text:" section.
+func BuildUserMessage(sourceLang, targetLang, text, genreContext string) string {
+	srcName := model.GetLanguageName(sourceLang)
 	tgtName := model.GetLanguageName(targetLang)
-	return fmt.Sprintf("Translate the following text into %s. Output only the translation, nothing else.\n\n%s",
-		tgtName, text)
+	
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf(
+		"Translate the following text from %s into %s.\n",
+		srcName, tgtName,
+	))
+	sb.WriteString("Translate faithfully and preserve the meaning of every sentence. ")
+	sb.WriteString("Do not summarize or invent new details.\n\n")
+	
+	if genreContext != "" {
+		sb.WriteString(genreContext)
+		sb.WriteString("\n\n")
+	}
+	
+	sb.WriteString("Text:\n")
+	sb.WriteString(text)
+	
+	return sb.String()
 }
 
 func StripThinkingTags(text string) string {

@@ -305,7 +305,7 @@ func (t *Translator) translateChunk(
 		ThinkingMode:      params.ThinkingMode,
 	}
 
-	userMsg := BuildUserMessage(p.SourceLang, p.TargetLang, chunk.SourceText)
+	userMsg := BuildUserMessage(p.SourceLang, p.TargetLang, chunk.SourceText, p.GenreContext)
 	err = backend.ChatStream(ctx, systemPrompt, userMsg, func(token string) {
 		result.WriteString(token)
 		tokenCount++

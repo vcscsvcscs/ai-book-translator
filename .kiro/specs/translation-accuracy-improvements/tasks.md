@@ -15,11 +15,11 @@
   - [x] 2.3 Preserve style prompt section functionality
   - [x] 2.4 Test prompt generation with various language pairs
 
-- [ ] 3. Improve User Prompt
-  - [ ] 3.1 Update BuildUserMessage() signature to accept genre context
-  - [ ] 3.2 Add faithful translation instructions
-  - [ ] 3.3 Implement genre context injection before "Text:" section
-  - [ ] 3.4 Test with and without genre context
+- [x] 3. Improve User Prompt
+  - [x] 3.1 Update BuildUserMessage() signature to accept genre context
+  - [x] 3.2 Add faithful translation instructions
+  - [x] 3.3 Implement genre context injection before "Text:" section
+  - [x] 3.4 Test with and without genre context
 
 - [ ] 4. Implement Sampling Defaults
   - [ ] 4.1 Create applyDefault() helper function for float32
