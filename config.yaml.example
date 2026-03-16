@@ -17,7 +17,27 @@ gemini:
   api_key: "YOUR_GEMINI_API_KEY"
   model: "gemini-2.5-flash-preview-05-20"  # Options: gemini-1.5-flash, gemini-1.5-pro, etc.
 
-# Ollama Configuration (for local models)
+# Ollama Configuration (for local models / llama.cpp server)
 ollama:
-  model: "llama3.1"  # Options: llama3.1, mistral, codellama, etc.
+  model: "llama3.1"  # Options: llama3.1, qwen3.5:9b, Q3.5-35B, etc.
   base_url: "http://localhost:11434"  # Default Ollama server URL
+  # Optional sampling / Qwen instruct mode (passed to server per request):
+  # temperature: 0.7
+  # top_p: 0.8
+  # top_k: 20
+  # repeat_penalty: 1.0
+  # min_p: 0.0
+  # presence_penalty: 1.5
+  # num_predict: 2048
+  # chat_template_kwargs:  # if server supports it (e.g. llama.cpp with instruct variant)
+  #   enable_thinking: false
+# For Qwen instruct preset use: config.ollama-qwen-instruct.yaml
+# Server-side example: docs/server-qwen-llamacpp.example.yaml
+
+# Qwen Configuration (for local Qwen2 models like PULI-Trio-Q)
+qwen:
+  model: "NYTK/PULI-Trio-Q"  # Qwen2 model identifier
+  device_map: "auto"  # Options: auto, cpu, cuda, cuda:0, etc.
+  max_new_tokens: 512  # Maximum tokens to generate
+  temperature: 0.2  # Sampling temperature
+  max_seq_length: 32768  # Maximum sequence length (PULI-Trio-Q limit: 32768 tokens)

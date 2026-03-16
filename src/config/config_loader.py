@@ -40,7 +40,7 @@ class ConfigLoader:
             raise ConfigurationError("Configuration must be a dictionary")
 
         # Check for at least one provider configuration
-        providers = ["openai", "azure", "gemini", "ollama"]
+        providers = ["openai", "azure", "gemini", "ollama", "qwen"]
         if not any(provider in self._config for provider in providers):
             raise ConfigurationError(
                 f"At least one provider must be configured: {providers}"
@@ -68,6 +68,8 @@ class ConfigLoader:
             self._validate_gemini_config(config)
         elif provider == "ollama":
             self._validate_ollama_config(config)
+        elif provider == "qwen":
+            self._validate_qwen_config(config)
         else:
             raise ConfigurationError(f"Unknown provider: {provider}")
 
@@ -106,3 +108,12 @@ class ConfigLoader:
         base_url = config.get("base_url", "http://localhost:11434")
         if not (base_url.startswith("http://") or base_url.startswith("https://")):
             raise ConfigurationError("Ollama base_url must be a valid HTTP/HTTPS URL")
+
+    def _validate_qwen_config(self, config: Dict[str, Any]):
+        """Validate Qwen configuration."""
+        if not config.get("model"):
+            raise ConfigurationError("Qwen model name is required")
+
+        model = config.get("model")
+        if not isinstance(model, str) or not model:
+            raise ConfigurationError("Qwen model must be a non-empty string")

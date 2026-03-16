@@ -1,0 +1,25 @@
+# Ollama / llama.cpp — Qwen3.5 in instruct mode (no thinking block)
+# Use with: --config config.ollama-qwen-instruct.yaml --llm-provider ollama
+#
+# Instruct mode: enable_thinking false + Qwen-recommended sampling.
+# Point base_url at your llama.cpp server or Ollama that uses the instruct variant.
+
+ollama:
+  model: "qwen3.5:9b" # or your model ID, e.g. qwen3.5:9b
+  base_url: "http://localhost:11434" # your llama.cpp server or Ollama
+  request_timeout: 300.0
+
+  # Qwen instruct mode (no thinking) — server must support chat_template_kwargs
+  chat_template_kwargs:
+    enable_thinking: false
+
+  # Qwen-recommended instruct sampling
+  temperature: 0.7
+  top_p: 0.8
+  top_k: 20
+  repeat_penalty: 1.0
+  min_p: 0.0
+  presence_penalty: 1.5
+
+  # Cap output length (avoids runaway generation)
+  num_predict: 2048

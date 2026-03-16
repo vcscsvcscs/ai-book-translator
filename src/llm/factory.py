@@ -6,9 +6,16 @@ from typing import Dict, Any
 from llama_index.core.llms import LLM
 
 from .providers.openai_provider import OpenAIProvider
-from .providers.azure_provider import AzureProvider
-from .providers.gemini_provider import GeminiProvider
+try:
+    from .providers.azure_provider import AzureProvider
+except ImportError:
+    AzureProvider = None
+try:
+    from .providers.gemini_provider import GeminiProvider
+except ImportError:
+    GeminiProvider = None
 from .providers.ollama_provider import OllamaProvider
+from .providers.qwen_provider import QwenProvider
 from utils.exceptions import ConfigurationError
 
 
@@ -17,10 +24,13 @@ class LLMFactory:
 
     PROVIDERS = {
         "openai": OpenAIProvider,
-        "azure": AzureProvider,
-        "gemini": GeminiProvider,
         "ollama": OllamaProvider,
+        "qwen": QwenProvider,
     }
+    if AzureProvider:
+        PROVIDERS["azure"] = AzureProvider
+    if GeminiProvider:
+        PROVIDERS["gemini"] = GeminiProvider
 
     def __init__(self, config: Dict[str, Any]):
         self.config = config

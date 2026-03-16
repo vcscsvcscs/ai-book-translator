@@ -1,0 +1,31 @@
+# Example server/runner config for Qwen3.5 (e.g. llama.cpp or your orchestration).
+# Use this to run the model with an "instruct" variant (no thinking) and a "thinking-coding" variant.
+#
+# Typo fixed: temperture -> temperature
+
+Q3.5-35B:
+  env:
+    - "CUDA_VISIBLE_DEVICES=GPU-6f0,GPU-f10"
+  filters:
+    stripParams: "temperature, top_k, top_p, repeat_penalty, min_p, presence_penalty"
+    setParamsByID:
+      "${MODEL_ID}:thinking-coding":
+        temperature: 0.6
+        presence_penalty: 0.0
+      "${MODEL_ID}:instruct":
+        chat_template_kwargs:
+          enable_thinking: false
+        temperature: 0.7
+        top_p: 0.8
+  cmd: |
+    ${server-latest}
+    --model /path/to/models/Qwen3.5-35B-A3B-UD-Q8_K_XL.gguf
+    --ctx-size 131072
+    # general: thinking and general tasks
+    --temp 1.0 --min-p 0.0 --top-k 20 --top-p 0.95 --repeat_penalty 1.0 --presence_penalty 1.5
+    --fit off
+    --spec-type ngram-mod --spec-ngram-size-n 24 --draft-min 48 --draft-max 64
+
+# To force instruct from CLI (if your server supports it):
+#   --chat-template-kwargs '{"enable_thinking": false}'
+# Plus Qwen instruct params: --repeat_penalty 1.0 --presence_penalty 1.5 --min-p 0.0 --top-k 20 --top-p 0.8 --temp 0.7

@@ -5,6 +5,12 @@ Main CLI entry point for the book translator.
 
 import argparse
 import sys
+from pathlib import Path
+
+# Allow running as python -m src.main from project root (src dir must be on path)
+_src_dir = Path(__file__).resolve().parent
+if _src_dir not in (Path(p).resolve() for p in sys.path):
+    sys.path.insert(0, str(_src_dir))
 
 from config.config_loader import ConfigLoader
 from llm.factory import LLMFactory
@@ -72,7 +78,7 @@ Examples:
     )
     translate_parser.add_argument(
         "--llm-provider",
-        choices=["openai", "azure", "gemini", "ollama"],
+        choices=["openai", "azure", "gemini", "ollama", "qwen"],
         required=True,
         help="LLM provider to use",
     )
@@ -137,7 +143,7 @@ Examples:
     )
     fix_parser.add_argument(
         "--llm-provider",
-        choices=["openai", "azure", "gemini", "ollama"],
+        choices=["openai", "azure", "gemini", "ollama", "qwen"],
         required=True,
         help="LLM provider to use",
     )

@@ -2,6 +2,8 @@
 Chapter translation functionality with chunk-level caching support.
 """
 
+import os
+import re
 import time
 from bs4 import BeautifulSoup
 from llama_index.core.llms import LLM
@@ -241,7 +243,27 @@ class ChapterTranslator:
         for attempt in range(self.max_retries):
             try:
                 response = self.llm.complete(prompt)
-                return response.text.strip()
+                translated_text = self._extract_translation(
+                    response.text, text, to_lang
+                )
+                # Accept short identical output (names, numbers, terms same in both languages)
+                invalid = (
+                    not translated_text
+                    or (translated_text == text and len(text) > 50)
+                )
+                if invalid:
+                    if os.environ.get("TRANSLATION_DEBUG"):
+                        raw_preview = (response.text or "")[:400].replace("\n", " ")
+                        print(f"    [DEBUG] raw response (first 400 chars): {raw_preview!r}")
+                        print(f"    [DEBUG] extracted: {translated_text!r}")
+                    if attempt < self.max_retries - 1:
+                        print(f"    ⚠️  Empty or invalid translation on attempt {attempt + 1}, retrying...")
+                        continue
+                    else:
+                        print(f"    ⚠️  Failed to get valid translation after {self.max_retries} attempts, using original text")
+                        return text
+                
+                return translated_text
 
             except Exception as e:
                 if str(e).lower().__contains__("filter"):
@@ -259,6 +281,53 @@ class ChapterTranslator:
                 )
 
         return ""
+
+    def _extract_translation(self, raw_response: str, original_text: str, to_lang: str) -> str:
+        """Extract translation from model response; strip thinking blocks and markers."""
+        if not (raw_response or "").strip():
+            return ""
+        out = raw_response.strip()
+        out = self._strip_thinking_blocks(out)
+        # Prefer content after explicit translation headers
+        if f"Translation in {to_lang}:" in out:
+            out = out.split(f"Translation in {to_lang}:")[-1].strip()
+        elif "Translation:" in out:
+            out = out.split("Translation:")[-1].strip()
+        elif out.lower().startswith((f"{to_lang}:", f"{to_lang} ")):
+            out = out.split(":", 1)[-1].strip() if ":" in out else out
+        # Remove echoed source text only when the part after is non-empty
+        if original_text in out:
+            after = out.split(original_text, 1)[-1].strip()
+            if after:
+                out = after
+        out = out.replace("<|im_end|>", "").replace("<|im_start|>", "").strip()
+        # Strip common assistant/chat prefixes (Ollama sometimes adds these)
+        for prefix in ("Assistant:", "assistant:", "A:", "answer:", "Answer:"):
+            if out.lower().startswith(prefix.lower()):
+                out = out[len(prefix):].strip()
+                break
+        # Instruct mode: no header; if we stripped to empty, use full reply
+        if not out and raw_response.strip():
+            out = self._strip_thinking_blocks(raw_response.strip())
+            out = out.replace("<|im_end|>", "").replace("<|im_start|>", "").strip()
+        # Unwrap markdown code block (e.g. ```hu\n...\n```) when present
+        if re.match(r"^```\w*\s*\n", out) and out.rstrip().endswith("```"):
+            match = re.search(r"```(?:\w*)\s*\n(.*?)```", out, re.DOTALL)
+            if match:
+                out = match.group(1).strip()
+        elif not out and raw_response.strip():
+            match = re.search(r"```(?:\w*)\s*\n(.*?)```", raw_response.strip(), re.DOTALL)
+            if match:
+                out = match.group(1).strip()
+        # Last resort: use full response minus thinking (in case all above left empty)
+        if not out:
+            out = self._strip_thinking_blocks(raw_response.strip())
+            out = out.replace("<|im_end|>", "").replace("<|im_start|>", "").strip()
+        return out
+
+    def _strip_thinking_blocks(self, raw: str) -> str:
+        """Remove thinking/reasoning blocks (e.g. Qwen <think>...) so only the final answer remains."""
+        return re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
 
     def _handle_translation_error(self, error: Exception, attempt: int):
         """Handle translation errors with appropriate retry logic."""
@@ -306,8 +375,11 @@ class ChapterTranslator:
         
         base_prompt += (
             f"Maintain readability and consistency with the source text while making it read naturally in {to_lang}. "
-            f"Do not add explanations, comments, or notes - only provide the translation.\n\n"
-            f"Text to translate:\n{text}"
+            f"Use correct grammar and natural {to_lang} sentence structure. "
+            f"IMPORTANT: You must translate the text exactly, do not continue the story, do not add new content, do not summarize. "
+            f"Only provide the complete translation of the given text in {to_lang}.\n\n"
+            f"Text to translate:\n{text}\n\n"
+            f"Translation in {to_lang}:"
         )
         
         return base_prompt

@@ -9,7 +9,8 @@ This tool not only translates the text but also carefully compiles each element 
 - **OpenAI**: GPT-4o, GPT-4o-mini, GPT-3.5-turbo and other OpenAI models
 - **Azure OpenAI**: Use OpenAI models through Microsoft Azure
 - **Google Gemini**: Gemini-1.5-flash, Gemini-1.5-pro and other Gemini models
-- **Ollama**: Run local models like Llama 3.1, Mistral, CodeLlama, etc.
+- **Ollama**: Run local models like Llama 3.1, qwen3.5:9b, Mistral, CodeLlama, etc.
+- **Qwen**: Run local Qwen2 models like PULI-Trio-Q
 
 ## 🛠️ Installation
 
@@ -54,11 +55,25 @@ gemini:
 ### Ollama (Local)
 ```yaml
 ollama:
-  model: "llama3.1"
+  model: "llama3.1"   # or "qwen3.5:9b", "mistral", etc.
   base_url: "http://localhost:11434"
 ```
 
-For Ollama, make sure you have Ollama installed and running locally with your desired model pulled.
+For Ollama, make sure you have Ollama installed and running locally with your desired model pulled (e.g. `ollama run qwen3.5:9b`).
+
+### Qwen (Local)
+```yaml
+qwen:
+  model: "NYTK/PULI-Trio-Q"  # Qwen2 model identifier
+  device_map: "auto"  # Options: auto, cpu, cuda, cuda:0, etc.
+  max_new_tokens: 512  # Maximum tokens to generate
+  temperature: 0.2  # Sampling temperature
+  max_seq_length: 32768  # Maximum sequence length (PULI-Trio-Q limit: 32768 tokens)
+```
+
+For Qwen, the model will be automatically downloaded from Hugging Face Hub on first use. Make sure you have `transformers`, `torch`, and `accelerate` installed. The model will run locally on your machine - use `device_map: "cuda"` or `device_map: "cuda:0"` for GPU acceleration if available.
+
+**Important**: The PULI-Trio-Q model has a maximum sequence length of 32,768 tokens. The implementation automatically checks and warns if prompts exceed this limit, adjusting `max_new_tokens` accordingly.
 
 ## 🎮 Usage
 
@@ -107,6 +122,21 @@ python -m src.main translate --input yourbook.epub --output translatedbook --con
 **Using Ollama (Local):**
 ```bash
 python -m src.main translate --input yourbook.epub --output translatedbook --config config.yaml --from-lang EN --to-lang PL --llm-provider ollama
+```
+
+**Translate first 10 chapters with Ollama (qwen3.5:9b):**
+
+Use the dedicated config and limit chapters with `--to-chapter 10`:
+
+```bash
+python -m src.main translate --input yourbook.epub --output translatedbook --config config.ollama-qwen3.5.yaml --llm-provider ollama --from-lang EN --to-lang HU --to-chapter 10
+```
+
+Ensure Ollama is running and the model is pulled: `ollama run qwen3.5:9b`.
+
+**Using Qwen (Local):**
+```bash
+python -m src.main translate --input yourbook.epub --output translatedbook --config config.yaml --from-lang EN --to-lang PL --llm-provider qwen
 ```
 
 **Note:** The output path should be specified without extension. The tool will generate files with appropriate extensions based on the selected output formats.
@@ -207,6 +237,15 @@ Use standard language codes for translation:
 - Pull models using: `ollama pull llama3.1`
 - Slower than cloud providers but completely private
 
+### Qwen
+- Runs completely locally - no API costs
+- Requires `transformers`, `torch`, and `accelerate` libraries
+- Models are automatically downloaded from Hugging Face Hub on first use
+- Supports GPU acceleration with `device_map: "cuda"`
+- Great for specialized models like PULI-Trio-Q (Hungarian-English-Chinese)
+- **PULI-Trio-Q limit**: Maximum sequence length of 32,768 tokens (automatically enforced)
+- Slower than cloud providers but completely private and customizable
+
 ## 📖 Converting from AZW3 to EPUB
 
 For books in AZW3 format (Amazon Kindle), use Calibre (https://calibre-ebook.com) to convert them to EPUB before using this tool.
@@ -232,7 +271,7 @@ The project is organized into the following modules:
 - `src/main.py`: Main CLI entry point
 - `src/config/`: Configuration loading and management
 - `src/epub/`: EPUB reading, writing, and analysis
-- `src/llm/`: LLM provider implementations (OpenAI, Azure, Gemini, Ollama)
+- `src/llm/`: LLM provider implementations (OpenAI, Azure, Gemini, Ollama, Qwen)
 - `src/translation/`: Core translation logic, chunking, caching, and progress tracking
 - `src/translation/output/`: Output format generators (EPUB, PDF, Markdown)
 - `src/utils/`: Utility functions for text processing, fonts, and exceptions
