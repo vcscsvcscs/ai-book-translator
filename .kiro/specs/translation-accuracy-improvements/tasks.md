@@ -9,11 +9,11 @@
   - [x] 1.4 Verify JSON serialization works with new fields
   - [x] 1.5 Test backward compatibility with existing project files
 
-- [-] 2. Enhance System Prompt
-  - [ ] 2.1 Update BuildSystemPrompt() with accuracy-focused rules
-  - [ ] 2.2 Add anti-hallucination guard rule
-  - [ ] 2.3 Preserve style prompt section functionality
-  - [ ] 2.4 Test prompt generation with various language pairs
+- [x] 2. Enhance System Prompt
+  - [x] 2.1 Update BuildSystemPrompt() with accuracy-focused rules
+  - [x] 2.2 Add anti-hallucination guard rule
+  - [x] 2.3 Preserve style prompt section functionality
+  - [x] 2.4 Test prompt generation with various language pairs
 
 - [ ] 3. Improve User Prompt
   - [ ] 3.1 Update BuildUserMessage() signature to accept genre context

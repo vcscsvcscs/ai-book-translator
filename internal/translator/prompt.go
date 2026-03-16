@@ -13,22 +13,22 @@ func BuildSystemPrompt(sourceLang, targetLang, stylePrompt string) string {
 
 	var sb strings.Builder
 
+	sb.WriteString("You are a professional literary translator.\n")
 	sb.WriteString(fmt.Sprintf(
-		"You are a professional literary translator specializing in %s to %s translation.\n",
+		"Your task is to translate text faithfully from %s to %s.\n\n",
 		srcName, tgtName,
 	))
-	sb.WriteString(fmt.Sprintf(
-		"Your sole task is to output the %s translation of whatever text the user provides — nothing else.\n\n",
-		tgtName,
-	))
 	sb.WriteString("Rules:\n")
-	sb.WriteString("- Output ONLY the translated text. No preamble, no commentary, no notes, no explanations.\n")
-	sb.WriteString("- Do NOT include the source text in your response.\n")
-	sb.WriteString("- Do NOT translate the word-for-word; produce natural, fluent literary prose.\n")
-	sb.WriteString(fmt.Sprintf("- Use correct %s grammar and natural sentence structure.\n", tgtName))
-	sb.WriteString("- Preserve all paragraph breaks exactly as in the source.\n")
-	sb.WriteString("- Keep proper nouns (character names, place names) unchanged.\n")
-	sb.WriteString("- Do not continue, summarize, or add to the story.\n")
+	sb.WriteString("- Output ONLY the translated text.\n")
+	sb.WriteString("- Do NOT add commentary, explanations, or notes.\n")
+	sb.WriteString("- Do NOT include the original text.\n")
+	sb.WriteString("- Preserve the exact meaning of every sentence.\n")
+	sb.WriteString("- Do NOT invent or replace objects, locations, or actions.\n")
+	sb.WriteString("- Maintain the original paragraph structure.\n")
+	sb.WriteString("- Keep character names and proper nouns unchanged.\n")
+	sb.WriteString("- Prefer accuracy over creativity.\n")
+	sb.WriteString("- If a sentence is unclear, translate it literally rather than guessing.\n")
+	sb.WriteString(fmt.Sprintf("- Maintain natural grammar and style in %s.\n", tgtName))
 
 	if stylePrompt != "" {
 		sb.WriteString(fmt.Sprintf("\nStyle: %s\n", stylePrompt))
