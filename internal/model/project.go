@@ -37,6 +37,11 @@ type Project struct {
 	Chapters      []Chapter   `json:"chapters"`
 	CreatedAt     time.Time   `json:"created_at"`
 	UpdatedAt     time.Time   `json:"updated_at"`
+	
+	// Translation accuracy improvements
+	GenreContext     string `json:"genre_context,omitempty"`      // Optional genre hint (e.g., "The text is from a fantasy novel.")
+	EnablePolishPass bool   `json:"enable_polish_pass"`           // Enable two-pass translation
+	MaxContextTokens int    `json:"max_context_tokens,omitempty"` // Model context window size (default: 32000)
 }
 
 type Chapter struct {

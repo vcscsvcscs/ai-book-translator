@@ -2,14 +2,14 @@
 
 ## Task List
 
-- [-] 1. Update Project Model with New Fields
+- [x] 1. Update Project Model with New Fields
   - [x] 1.1 Add GenreContext field to Project struct
   - [x] 1.2 Add EnablePolishPass field to Project struct
   - [x] 1.3 Add MaxContextTokens field to Project struct with default 32000
-  - [-] 1.4 Verify JSON serialization works with new fields
-  - [ ] 1.5 Test backward compatibility with existing project files
+  - [x] 1.4 Verify JSON serialization works with new fields
+  - [x] 1.5 Test backward compatibility with existing project files
 
-- [ ] 2. Enhance System Prompt
+- [-] 2. Enhance System Prompt
   - [ ] 2.1 Update BuildSystemPrompt() with accuracy-focused rules
   - [ ] 2.2 Add anti-hallucination guard rule
   - [ ] 2.3 Preserve style prompt section functionality

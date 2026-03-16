@@ -7,56 +7,41 @@ import (
 	"github.com/vcscsvcscs/ai-book-translator/internal/model"
 )
 
-func BuildSystemPrompt(sourceLang, targetLang, stylePrompt string, params model.ModelParams) string {
+func BuildSystemPrompt(sourceLang, targetLang, stylePrompt string) string {
 	srcName := model.GetLanguageName(sourceLang)
 	tgtName := model.GetLanguageName(targetLang)
 
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf(
-		"You are a professional literary translator. Translate the provided text from %s to %s.\n\n",
+		"You are a professional literary translator specializing in %s to %s translation.\n",
 		srcName, tgtName,
 	))
-
 	sb.WriteString(fmt.Sprintf(
-		"Maintain readability and consistency with the source text while making it read naturally in %s. "+
-			"Use correct grammar and natural %s sentence structure.\n\n",
-		tgtName, tgtName,
+		"Your sole task is to output the %s translation of whatever text the user provides — nothing else.\n\n",
+		tgtName,
 	))
-
-	sb.WriteString("IMPORTANT RULES:\n")
-	sb.WriteString("- You MUST translate the text exactly — do not continue the story, do not add new content, do not summarize.\n")
-	sb.WriteString(fmt.Sprintf("- Output ONLY the complete %s translation of the given text — nothing else.\n", tgtName))
-	sb.WriteString("- Do NOT include the original text in your response.\n")
-	sb.WriteString("- Do NOT add commentary, notes, or explanations.\n")
+	sb.WriteString("Rules:\n")
+	sb.WriteString("- Output ONLY the translated text. No preamble, no commentary, no notes, no explanations.\n")
+	sb.WriteString("- Do NOT include the source text in your response.\n")
+	sb.WriteString("- Do NOT translate the word-for-word; produce natural, fluent literary prose.\n")
+	sb.WriteString(fmt.Sprintf("- Use correct %s grammar and natural sentence structure.\n", tgtName))
 	sb.WriteString("- Preserve all paragraph breaks exactly as in the source.\n")
-	sb.WriteString("- Keep proper nouns (character names, place names) as-is.\n")
+	sb.WriteString("- Keep proper nouns (character names, place names) unchanged.\n")
+	sb.WriteString("- Do not continue, summarize, or add to the story.\n")
 
 	if stylePrompt != "" {
-		sb.WriteString(fmt.Sprintf("\nStyle instructions: %s\n", stylePrompt))
-	}
-
-	switch params.ThinkingMode {
-	case model.ThinkingEnabled:
-		sb.WriteString("\n/think")
-	case model.ThinkingBudget:
-		if params.ThinkingBudget > 0 {
-			sb.WriteString(fmt.Sprintf("\n/think budget=%d", params.ThinkingBudget))
-		} else {
-			sb.WriteString("\n/think")
-		}
-	default:
-		sb.WriteString("\n/no_think")
+		sb.WriteString(fmt.Sprintf("\nStyle: %s\n", stylePrompt))
 	}
 
 	return sb.String()
 }
 
-// BuildUserMessage wraps the source text with explicit framing so the model
-// cannot mistake the instruction for content to translate.
+// BuildUserMessage wraps the source text for translation.
 func BuildUserMessage(sourceLang, targetLang, text string) string {
 	tgtName := model.GetLanguageName(targetLang)
-	return fmt.Sprintf("Text to translate:\n%s\n\nTranslation in %s:", text, tgtName)
+	return fmt.Sprintf("Translate the following text into %s. Output only the translation, nothing else.\n\n%s",
+		tgtName, text)
 }
 
 func StripThinkingTags(text string) string {
