@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -128,11 +129,28 @@ func showCreateProject(onDone func()) {
 	chunkSizeEntry.SetText("500")
 
 	// ── Model params ─────────────────────────────────────────────────────────
+	defaults := model.DefaultModelParams()
+
 	temperatureEntry := widget.NewEntry()
-	temperatureEntry.SetText("0.3")
+	temperatureEntry.SetText(fmt.Sprintf("%.2f", defaults.Temperature))
 
 	maxTokensEntry := widget.NewEntry()
-	maxTokensEntry.SetText("2048")
+	maxTokensEntry.SetText(strconv.Itoa(defaults.MaxTokens))
+
+	topKEntry := widget.NewEntry()
+	topKEntry.SetText(strconv.Itoa(defaults.TopK))
+
+	topPEntry := widget.NewEntry()
+	topPEntry.SetText(fmt.Sprintf("%.2f", defaults.TopP))
+
+	minPEntry := widget.NewEntry()
+	minPEntry.SetText(fmt.Sprintf("%.2f", defaults.MinP))
+
+	presencePenaltyEntry := widget.NewEntry()
+	presencePenaltyEntry.SetText(fmt.Sprintf("%.2f", defaults.PresencePenalty))
+
+	repetitionPenaltyEntry := widget.NewEntry()
+	repetitionPenaltyEntry.SetText(fmt.Sprintf("%.2f", defaults.RepetitionPenalty))
 
 	thinkingSelect := widget.NewSelect(
 		[]string{model.ThinkingDisabled, model.ThinkingEnabled, model.ThinkingBudget},
@@ -142,6 +160,30 @@ func showCreateProject(onDone func()) {
 
 	thinkingBudgetEntry := widget.NewEntry()
 	thinkingBudgetEntry.SetPlaceHolder("Token budget (budget mode only)")
+
+	presetSelect := widget.NewSelect([]string{
+		"— Qwen3 Non-Thinking (general)",
+		"— Qwen3 Thinking (general)",
+	}, func(s string) {
+		var preset model.ModelParams
+		switch s {
+		case "— Qwen3 Non-Thinking (general)":
+			preset = model.Qwen3PresetNonThinking()
+		case "— Qwen3 Thinking (general)":
+			preset = model.Qwen3PresetThinking()
+		default:
+			return
+		}
+		temperatureEntry.SetText(fmt.Sprintf("%.2f", preset.Temperature))
+		maxTokensEntry.SetText(strconv.Itoa(preset.MaxTokens))
+		topKEntry.SetText(strconv.Itoa(preset.TopK))
+		topPEntry.SetText(fmt.Sprintf("%.2f", preset.TopP))
+		minPEntry.SetText(fmt.Sprintf("%.2f", preset.MinP))
+		presencePenaltyEntry.SetText(fmt.Sprintf("%.2f", preset.PresencePenalty))
+		repetitionPenaltyEntry.SetText(fmt.Sprintf("%.2f", preset.RepetitionPenalty))
+		thinkingSelect.SetSelected(preset.ThinkingMode)
+	})
+	presetSelect.PlaceHolder = "Load preset…"
 
 	// ── Form ─────────────────────────────────────────────────────────────────
 	modelBrowseRow := container.NewBorder(nil, nil, nil, browseModelBtn, modelEntry)
@@ -161,8 +203,14 @@ func showCreateProject(onDone func()) {
 			{Text: "Style Prompt", Widget: styleEntry},
 			{Text: "Chunk Strategy", Widget: strategySelect},
 			{Text: "Chunk Size", Widget: chunkSizeEntry},
+			{Text: "Preset", Widget: presetSelect},
 			{Text: "Temperature", Widget: temperatureEntry},
 			{Text: "Max Tokens", Widget: maxTokensEntry},
+			{Text: "Top K", Widget: topKEntry},
+			{Text: "Top P", Widget: topPEntry},
+			{Text: "Min P", Widget: minPEntry},
+			{Text: "Presence Penalty", Widget: presencePenaltyEntry},
+			{Text: "Repetition Penalty", Widget: repetitionPenaltyEntry},
 			{Text: "Thinking Mode", Widget: thinkingSelect},
 			{Text: "Think Budget", Widget: thinkingBudgetEntry},
 		},
@@ -180,6 +228,11 @@ func showCreateProject(onDone func()) {
 				chunkSizeEntry.Text,
 				temperatureEntry.Text,
 				maxTokensEntry.Text,
+				topKEntry.Text,
+				topPEntry.Text,
+				minPEntry.Text,
+				presencePenaltyEntry.Text,
+				repetitionPenaltyEntry.Text,
 				thinkingSelect.Selected,
 				thinkingBudgetEntry.Text,
 				onDone,
@@ -203,6 +256,7 @@ func createProjectFromForm(
 	name, filePath, provider, providerURL, modelPath,
 	sourceLang, targetLang, stylePrompt, strategy,
 	chunkSizeStr, temperatureStr, maxTokensStr,
+	topKStr, topPStr, minPStr, presencePenaltyStr, repetitionPenaltyStr,
 	thinkingMode, thinkingBudgetStr string,
 	onDone func(),
 ) error {
@@ -265,12 +319,15 @@ func createProjectFromForm(
 		ChunkStrategy: strategy,
 		ChunkMaxSize:  chunkSize,
 		ModelParams: model.ModelParams{
-			Temperature:    parseFloat32Or(temperatureStr, 0.3),
-			MaxTokens:      parseIntOr(maxTokensStr, 2048),
-			TopK:           40,
-			TopP:           0.9,
-			ThinkingMode:   thinkingMode,
-			ThinkingBudget: parseIntOr(thinkingBudgetStr, 0),
+			Temperature:       parseFloat32Or(temperatureStr, 0.7),
+			MaxTokens:         parseIntOr(maxTokensStr, 2048),
+			TopK:              parseIntOr(topKStr, 20),
+			TopP:              parseFloat32Or(topPStr, 0.8),
+			MinP:              parseFloat32Or(minPStr, 0.0),
+			PresencePenalty:   parseFloat32Or(presencePenaltyStr, 1.5),
+			RepetitionPenalty: parseFloat32Or(repetitionPenaltyStr, 1.0),
+			ThinkingMode:      thinkingMode,
+			ThinkingBudget:    parseIntOr(thinkingBudgetStr, 0),
 		},
 		ExportFormat: model.FormatEPUB,
 		Chapters:     projChapters,

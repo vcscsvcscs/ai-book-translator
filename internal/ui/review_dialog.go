@@ -129,6 +129,9 @@ func showReviewDialog(p *model.Project, chapterIdx, chunkIdx int) {
 	thinkingBudgetEntry.SetPlaceHolder("Budget (budget mode only)")
 	thinkingBudgetEntry.SetText(strconv.Itoa(p.ModelParams.ThinkingBudget))
 
+	topKEntry := widget.NewEntry()
+	topKEntry.SetText(strconv.Itoa(p.ModelParams.TopK))
+
 	minPEntry := widget.NewEntry()
 	minPEntry.SetText(fmt.Sprintf("%.2f", p.ModelParams.MinP))
 
@@ -154,6 +157,7 @@ func showReviewDialog(p *model.Project, chapterIdx, chunkIdx int) {
 		}
 		temperatureEntry.SetText(fmt.Sprintf("%.2f", preset.Temperature))
 		maxTokensEntry.SetText(strconv.Itoa(preset.MaxTokens))
+		topKEntry.SetText(strconv.Itoa(preset.TopK))
 		thinkingSelect.SetSelected(preset.ThinkingMode)
 		minPEntry.SetText(fmt.Sprintf("%.2f", preset.MinP))
 		presencePenaltyEntry.SetText(fmt.Sprintf("%.2f", preset.PresencePenalty))
@@ -172,8 +176,20 @@ func showReviewDialog(p *model.Project, chapterIdx, chunkIdx int) {
 		if n, err := strconv.Atoi(maxTokensEntry.Text); err == nil {
 			params.MaxTokens = n
 		}
+		if n, err := strconv.Atoi(topKEntry.Text); err == nil {
+			params.TopK = n
+		}
 		if b, err := strconv.Atoi(thinkingBudgetEntry.Text); err == nil {
 			params.ThinkingBudget = b
+		}
+		if v, err := strconv.ParseFloat(minPEntry.Text, 32); err == nil {
+			params.MinP = float32(v)
+		}
+		if v, err := strconv.ParseFloat(presencePenaltyEntry.Text, 32); err == nil {
+			params.PresencePenalty = float32(v)
+		}
+		if v, err := strconv.ParseFloat(repetitionPenaltyEntry.Text, 32); err == nil {
+			params.RepetitionPenalty = float32(v)
 		}
 
 		modelPath := modelEntry.Text
@@ -229,12 +245,17 @@ func showReviewDialog(p *model.Project, chapterIdx, chunkIdx int) {
 
 	// Collapsible retranslate options
 	optionsForm := &widget.Form{Items: []*widget.FormItem{
+		{Text: "Preset", Widget: presetSelect},
 		{Text: "Provider", Widget: providerSelect},
 		{Text: "Provider URL", Widget: providerURLEntry},
 		{Text: "Model", Widget: modelEntry},
 		{Text: "Ollama Models", Widget: container.NewBorder(nil, nil, nil, fetchBtn, ollamaModelSelect)},
 		{Text: "Temperature", Widget: temperatureEntry},
 		{Text: "Max Tokens", Widget: maxTokensEntry},
+		{Text: "Top K", Widget: topKEntry},
+		{Text: "Min P", Widget: minPEntry},
+		{Text: "Presence Penalty", Widget: presencePenaltyEntry},
+		{Text: "Repetition Penalty", Widget: repetitionPenaltyEntry},
 		{Text: "Thinking Mode", Widget: thinkingSelect},
 		{Text: "Think Budget", Widget: thinkingBudgetEntry},
 	}}
