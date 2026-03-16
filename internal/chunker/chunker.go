@@ -25,6 +25,7 @@ func New(strategy string, maxSize int) *Chunker {
 }
 
 func (c *Chunker) Chunk(text string) []string {
+	text = CleanText(text)
 	switch c.Strategy {
 	case model.ChunkStrategySentences:
 		return c.bySentences(text)
@@ -165,29 +166,17 @@ func (c *Chunker) splitLongText(text string) []string {
 }
 
 func splitParagraphs(text string) []string {
+	// Normalise: collapse 3+ newlines to 2, then split on either \n\n or single \n.
+	// The EPUB parser emits single \n between block elements, so we treat each
+	// non-empty line as its own paragraph unit and let the chunker merge them.
 	raw := strings.Split(text, "\n")
 	var paragraphs []string
-	var current strings.Builder
-
 	for _, line := range raw {
 		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			if current.Len() > 0 {
-				paragraphs = append(paragraphs, strings.TrimSpace(current.String()))
-				current.Reset()
-			}
-			continue
+		if trimmed != "" {
+			paragraphs = append(paragraphs, trimmed)
 		}
-		if current.Len() > 0 {
-			current.WriteString(" ")
-		}
-		current.WriteString(trimmed)
 	}
-
-	if current.Len() > 0 {
-		paragraphs = append(paragraphs, strings.TrimSpace(current.String()))
-	}
-
 	return paragraphs
 }
 

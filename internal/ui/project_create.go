@@ -104,10 +104,13 @@ func showCreateProject(onDone func()) {
 	localModelSelect.PlaceHolder = "Select from models dir…"
 
 	// ── Languages ────────────────────────────────────────────────────────────
-	sourceLang := widget.NewEntry()
-	sourceLang.SetText("en")
-	targetLang := widget.NewEntry()
-	targetLang.SetText("hu")
+	langOptions := model.SortedLanguageOptions()
+
+	sourceLangSelect := widget.NewSelect(langOptions, nil)
+	sourceLangSelect.SetSelected("en - English")
+
+	targetLangSelect := widget.NewSelect(langOptions, nil)
+	targetLangSelect.SetSelected("hu - Hungarian")
 
 	// ── Style ────────────────────────────────────────────────────────────────
 	styleEntry := widget.NewMultiLineEntry()
@@ -153,8 +156,8 @@ func showCreateProject(onDone func()) {
 			{Text: "Model", Widget: modelBrowseRow},
 			{Text: "Ollama Models", Widget: ollamaRow},
 			{Text: "Local Models Dir", Widget: localModelSelect},
-			{Text: "Source Language", Widget: sourceLang},
-			{Text: "Target Language", Widget: targetLang},
+			{Text: "Source Language", Widget: sourceLangSelect},
+			{Text: "Target Language", Widget: targetLangSelect},
 			{Text: "Style Prompt", Widget: styleEntry},
 			{Text: "Chunk Strategy", Widget: strategySelect},
 			{Text: "Chunk Size", Widget: chunkSizeEntry},
@@ -170,8 +173,8 @@ func showCreateProject(onDone func()) {
 				providerSelect.Selected,
 				providerURLEntry.Text,
 				modelEntry.Text,
-				sourceLang.Text,
-				targetLang.Text,
+				model.CodeFromOption(sourceLangSelect.Selected),
+				model.CodeFromOption(targetLangSelect.Selected),
 				styleEntry.Text,
 				strategySelect.Selected,
 				chunkSizeEntry.Text,

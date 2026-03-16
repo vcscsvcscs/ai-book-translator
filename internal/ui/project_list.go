@@ -10,11 +10,11 @@ import (
 )
 
 func buildProjectList() fyne.CanvasObject {
+	// Load once; the list holds a snapshot — call list.Refresh() to reload.
+	projects, _ := appStore.List()
+
 	list := widget.NewList(
-		func() int {
-			projects, _ := appStore.List()
-			return len(projects)
-		},
+		func() int { return len(projects) },
 		func() fyne.CanvasObject {
 			return container.NewVBox(
 				widget.NewLabel("Project Name"),
@@ -22,7 +22,6 @@ func buildProjectList() fyne.CanvasObject {
 			)
 		},
 		func(id widget.ListItemID, obj fyne.CanvasObject) {
-			projects, _ := appStore.List()
 			if id >= len(projects) {
 				return
 			}
@@ -41,7 +40,6 @@ func buildProjectList() fyne.CanvasObject {
 	)
 
 	list.OnSelected = func(id widget.ListItemID) {
-		projects, _ := appStore.List()
 		if id >= len(projects) {
 			return
 		}
@@ -50,6 +48,8 @@ func buildProjectList() fyne.CanvasObject {
 
 	newBtn := widget.NewButton("New Project", func() {
 		showCreateProject(func() {
+			// Reload the snapshot then refresh the widget.
+			projects, _ = appStore.List()
 			list.Refresh()
 		})
 	})

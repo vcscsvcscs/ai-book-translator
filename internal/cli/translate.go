@@ -15,6 +15,7 @@ func init() {
 	f := translateCmd.Flags()
 	f.Int("chapter", -1, "Translate only this chapter index")
 	f.Int("chunk", -1, "Translate only this chunk index (requires --chapter)")
+	f.IntSlice("chapters", nil, "Translate only these chapter indices (e.g. --chapters 0,2,5)")
 }
 
 var translateCmd = &cobra.Command{
@@ -29,6 +30,7 @@ var translateCmd = &cobra.Command{
 
 		chapterIdx, _ := cmd.Flags().GetInt("chapter")
 		chunkIdx, _ := cmd.Flags().GetInt("chunk")
+		chapterList, _ := cmd.Flags().GetIntSlice("chapters")
 
 		t := translator.New(appStore)
 		cb := cliProgressCallback()
@@ -41,6 +43,11 @@ var translateCmd = &cobra.Command{
 		if chapterIdx >= 0 {
 			fmt.Printf("Translating chapter %d...\n", chapterIdx)
 			return t.TranslateChapter(p, chapterIdx, cb)
+		}
+
+		if len(chapterList) > 0 {
+			fmt.Printf("Translating chapters %v...\n", chapterList)
+			return t.TranslateChapters(p, chapterList, cb)
 		}
 
 		completed, total := p.Progress()

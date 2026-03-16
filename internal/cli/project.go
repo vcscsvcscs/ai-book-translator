@@ -12,6 +12,7 @@ import (
 	"github.com/vcscsvcscs/ai-book-translator/internal/chunker"
 	"github.com/vcscsvcscs/ai-book-translator/internal/model"
 	"github.com/vcscsvcscs/ai-book-translator/internal/parser"
+	"github.com/vcscsvcscs/ai-book-translator/internal/translator"
 )
 
 func init() {
@@ -20,8 +21,19 @@ func init() {
 	projectCmd.AddCommand(projectListCmd)
 	projectCmd.AddCommand(projectShowCmd)
 	projectCmd.AddCommand(projectDeleteCmd)
+	projectCmd.AddCommand(projectSetModelCmd)
+	projectCmd.AddCommand(projectRechunkCmd)
 
-	f := projectCreateCmd.Flags()
+	f := projectSetModelCmd.Flags()
+	f.String("model", "", "New model name or path")
+	f.String("provider", "", "New provider: ollama, dlgo-http, dlgo")
+	f.String("provider-url", "", "New provider URL")
+
+	f = projectRechunkCmd.Flags()
+	f.String("chunk-strategy", "", "New chunk strategy (paragraph, sentences, tokens); empty = keep current")
+	f.Int("chunk-size", 0, "New max chunk size; 0 = keep current")
+
+	f = projectCreateCmd.Flags()
 	f.String("name", "", "Project name")
 	f.String("input", "", "Input file path (epub, pdf, or md)")
 	f.String("model", "", "Model name (Ollama) or path to .gguf file (dlgo)")
@@ -279,6 +291,76 @@ var projectDeleteCmd = &cobra.Command{
 			return err
 		}
 		fmt.Printf("Deleted project %s (%s)\n", shortID(p.ID), p.Name)
+		return nil
+	},
+}
+
+var projectSetModelCmd = &cobra.Command{
+	Use:   "set-model [project-id]",
+	Short: "Change the model/provider for an existing project",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		p, err := resolveProject(args[0])
+		if err != nil {
+			return err
+		}
+
+		modelPath, _ := cmd.Flags().GetString("model")
+		provider, _ := cmd.Flags().GetString("provider")
+		providerURL, _ := cmd.Flags().GetString("provider-url")
+
+		if modelPath == "" && provider == "" && providerURL == "" {
+			return fmt.Errorf("at least one of --model, --provider, or --provider-url is required")
+		}
+
+		if modelPath != "" {
+			p.ModelPath = modelPath
+		}
+		if provider != "" {
+			p.Provider = provider
+		}
+		if providerURL != "" {
+			p.ProviderURL = providerURL
+		}
+
+		if err := appStore.Save(p); err != nil {
+			return fmt.Errorf("save project: %w", err)
+		}
+
+		fmt.Printf("Updated project %s:\n", shortID(p.ID))
+		fmt.Printf("  Provider:     %s\n", p.Provider)
+		if p.ProviderURL != "" {
+			fmt.Printf("  Provider URL: %s\n", p.ProviderURL)
+		}
+		fmt.Printf("  Model:        %s\n", p.ModelPath)
+		return nil
+	},
+}
+
+var projectRechunkCmd = &cobra.Command{
+	Use:   "rechunk [project-id]",
+	Short: "Re-parse and re-chunk a project's source file",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		p, err := resolveProject(args[0])
+		if err != nil {
+			return err
+		}
+
+		strategy, _ := cmd.Flags().GetString("chunk-strategy")
+		maxSize, _ := cmd.Flags().GetInt("chunk-size")
+
+		t := translator.New(appStore)
+		if err := t.Rechunk(p, strategy, maxSize); err != nil {
+			return fmt.Errorf("rechunk: %w", err)
+		}
+
+		totalChunks := 0
+		for _, ch := range p.Chapters {
+			totalChunks += len(ch.Chunks)
+		}
+		fmt.Printf("Rechunked project %s: %d chapters, %d chunks (strategy=%s, max=%d)\n",
+			shortID(p.ID), len(p.Chapters), totalChunks, p.ChunkStrategy, p.ChunkMaxSize)
 		return nil
 	},
 }

@@ -6,8 +6,11 @@ type LLMBackend interface {
 }
 
 type LLMOptions struct {
-	MaxTokens   int
-	Temperature float32
-	TopK        int
-	TopP        float32
+	MaxTokens         int
+	Temperature       float32
+	TopK              int
+	TopP              float32
+	MinP              float32
+	PresencePenalty   float32
+	RepetitionPenalty float32
 }

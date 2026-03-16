@@ -15,6 +15,7 @@ type ProgressEvent struct {
 	ChunkIndex    int
 	EventType     string
 	Token         string
+	IsThinking    bool // true when token is inside <think>...</think>
 	TokensPerSec  float64
 	ChunkProgress float64
 	TotalProgress float64

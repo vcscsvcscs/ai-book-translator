@@ -16,9 +16,6 @@ type httpBackend struct {
 	client  *http.Client
 }
 
-// NewHTTPBackend creates a backend that talks to a dlgo server (or any OpenAI-compatible API).
-// serverURL should be like "http://localhost:8080".
-// modelName is the model identifier to use in API requests.
 func NewHTTPBackend(serverURL, modelName string) LLMBackend {
 	return &httpBackend{
 		baseURL: strings.TrimRight(serverURL, "/"),
@@ -31,7 +28,14 @@ type chatRequest struct {
 	Model    string        `json:"model"`
 	Messages []chatMessage `json:"messages"`
 	Stream   bool          `json:"stream"`
-	Options  *chatOptions  `json:"options,omitempty"`
+	// Top-level OpenAI-compatible fields
+	Temperature       float32  `json:"temperature,omitempty"`
+	MaxTokens         int      `json:"max_tokens,omitempty"`
+	TopP              float32  `json:"top_p,omitempty"`
+	PresencePenalty   float32  `json:"presence_penalty,omitempty"`
+	RepetitionPenalty float32  `json:"repetition_penalty,omitempty"`
+	// Ollama extra params go in the options object
+	Options *chatOptions `json:"options,omitempty"`
 }
 
 type chatMessage struct {
@@ -39,11 +43,10 @@ type chatMessage struct {
 	Content string `json:"content"`
 }
 
+// chatOptions carries Ollama-specific sampling params that aren't in the OpenAI spec.
 type chatOptions struct {
-	Temperature float32 `json:"temperature,omitempty"`
-	MaxTokens   int     `json:"max_tokens,omitempty"`
-	TopK        int     `json:"top_k,omitempty"`
-	TopP        float32 `json:"top_p,omitempty"`
+	TopK float32 `json:"top_k,omitempty"`
+	MinP float32 `json:"min_p,omitempty"`
 }
 
 type streamChunk struct {
@@ -66,14 +69,17 @@ func (h *httpBackend) ChatStream(system, user string, onToken func(string), opts
 	messages = append(messages, chatMessage{Role: "user", Content: user})
 
 	reqBody := chatRequest{
-		Model:    h.model,
-		Messages: messages,
-		Stream:   true,
+		Model:             h.model,
+		Messages:          messages,
+		Stream:            true,
+		Temperature:       opts.Temperature,
+		MaxTokens:         opts.MaxTokens,
+		TopP:              opts.TopP,
+		PresencePenalty:   opts.PresencePenalty,
+		RepetitionPenalty: opts.RepetitionPenalty,
 		Options: &chatOptions{
-			Temperature: opts.Temperature,
-			MaxTokens:   opts.MaxTokens,
-			TopK:        opts.TopK,
-			TopP:        opts.TopP,
+			TopK: float32(opts.TopK),
+			MinP: opts.MinP,
 		},
 	}
 

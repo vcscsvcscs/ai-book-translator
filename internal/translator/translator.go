@@ -120,6 +120,57 @@ func (t *Translator) TranslateProject(p *model.Project, onProgress ProgressCallb
 	return nil
 }
 
+// TranslateChapters translates only the specified chapter indices.
+func (t *Translator) TranslateChapters(p *model.Project, chapterIndices []int, onProgress ProgressCallback) error {
+	p.Status = model.StatusTranslating
+	_ = t.store.Save(p)
+
+	completed, total := p.Progress()
+
+	// Build a set for fast lookup
+	selected := make(map[int]bool, len(chapterIndices))
+	for _, idx := range chapterIndices {
+		selected[idx] = true
+	}
+
+	for ci := range p.Chapters {
+		if !selected[ci] {
+			continue
+		}
+		ch := &p.Chapters[ci]
+		for ki := range ch.Chunks {
+			chunk := &ch.Chunks[ki]
+			if chunk.Status == model.ChunkCompleted || chunk.Status == model.ChunkRevised {
+				continue
+			}
+			err := t.translateChunk(p, ci, ki, p.Provider, p.ProviderURL, p.ModelPath, p.ModelParams, onProgress, completed, total)
+			if err == nil {
+				completed++
+			}
+		}
+		if onProgress != nil {
+			onProgress(ProgressEvent{
+				ProjectID:     p.ID,
+				ChapterIndex:  ci,
+				EventType:     EventChapterDone,
+				TotalProgress: safeDiv(float64(completed), float64(total)),
+			})
+		}
+	}
+
+	p.Status = model.StatusPaused
+	_ = t.store.Save(p)
+
+	if onProgress != nil {
+		onProgress(ProgressEvent{
+			ProjectID:     p.ID,
+			EventType:     EventAllDone,
+			TotalProgress: safeDiv(float64(completed), float64(total)),
+		})
+	}
+	return nil
+}
+
 func (t *Translator) TranslateChapter(p *model.Project, chapterIdx int, onProgress ProgressCallback) error {
 	if chapterIdx < 0 || chapterIdx >= len(p.Chapters) {
 		return fmt.Errorf("chapter index %d out of range", chapterIdx)
@@ -238,17 +289,28 @@ func (t *Translator) translateChunk(
 	var result strings.Builder
 	tokenCount := 0
 	startTime := time.Now()
+	inThink := false
 
 	opts := LLMOptions{
-		MaxTokens:   params.MaxTokens,
-		Temperature: params.Temperature,
-		TopK:        params.TopK,
-		TopP:        params.TopP,
+		MaxTokens:         params.MaxTokens,
+		Temperature:       params.Temperature,
+		TopK:              params.TopK,
+		TopP:              params.TopP,
+		MinP:              params.MinP,
+		PresencePenalty:   params.PresencePenalty,
+		RepetitionPenalty: params.RepetitionPenalty,
 	}
 
-	err = backend.ChatStream(systemPrompt, chunk.SourceText, func(token string) {
+	userMsg := BuildUserMessage(p.SourceLang, p.TargetLang, chunk.SourceText)
+	err = backend.ChatStream(systemPrompt, userMsg, func(token string) {
 		result.WriteString(token)
 		tokenCount++
+
+		// Track whether we're inside a <think> block so the UI can route it.
+		combined := result.String()
+		openIdx := strings.LastIndex(combined, "<think>")
+		closeIdx := strings.LastIndex(combined, "</think>")
+		inThink = openIdx != -1 && (closeIdx == -1 || closeIdx < openIdx)
 
 		if onProgress != nil {
 			elapsed := time.Since(startTime).Seconds()
@@ -262,6 +324,7 @@ func (t *Translator) translateChunk(
 				ChunkIndex:   chunkIdx,
 				EventType:    EventToken,
 				Token:        token,
+				IsThinking:   inThink,
 				TokensPerSec: tokPerSec,
 			})
 		}
@@ -284,10 +347,7 @@ func (t *Translator) translateChunk(
 		return err
 	}
 
-	translated := result.String()
-	if params.ThinkingMode != model.ThinkingDisabled {
-		translated = StripThinkingTags(translated)
-	}
+	translated := StripThinkingTags(result.String())
 
 	displayModel := modelPath
 	if provider == model.ProviderOllama || provider == model.ProviderDlgoHTTP {

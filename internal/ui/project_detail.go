@@ -49,7 +49,8 @@ func buildProjectDetail(p *model.Project) fyne.CanvasObject {
 	var translating bool
 
 	translateBtn := widget.NewButton("Translate All", nil)
-	translateBtn.OnTapped = func() {
+
+	runTranslation := func(chapterIndices []int) {
 		mu.Lock()
 		if translating {
 			mu.Unlock()
@@ -63,56 +64,70 @@ func buildProjectDetail(p *model.Project) fyne.CanvasObject {
 
 		t := translator.New(appStore)
 
-		go func() {
-			t.TranslateProject(p, func(e translator.ProgressEvent) {
+		cb := func(e translator.ProgressEvent) {
+			fyne.Do(func() {
 				switch e.EventType {
 				case translator.EventChunkStart:
 					appendLog(logEntry, fmt.Sprintf("[ch %d / chunk %d] translating…", e.ChapterIndex, e.ChunkIndex))
-
-				case translator.EventToken:
-					// token streaming — could update a streaming label here
-
 				case translator.EventChunkDone:
 					progressBar.SetValue(e.TotalProgress)
 					c, tot := p.Progress()
-					progressLabel.SetText(fmt.Sprintf(
-						"%d/%d completed, %d failed", c, tot, p.FailedChunks(),
-					))
+					progressLabel.SetText(fmt.Sprintf("%d/%d completed, %d failed", c, tot, p.FailedChunks()))
 					appendLog(logEntry, fmt.Sprintf("  chunk done (%.0f%%)", e.TotalProgress*100))
-
 				case translator.EventChunkFailed:
 					appendLog(logEntry, fmt.Sprintf("  FAILED: %v", e.Error))
-
 				case translator.EventChapterDone:
 					appendLog(logEntry, fmt.Sprintf("[chapter %d complete]", e.ChapterIndex))
-
 				case translator.EventAllDone:
 					appendLog(logEntry, fmt.Sprintf("Translation finished (%.0f%%)", e.TotalProgress*100))
 				}
 			})
+		}
+
+		go func() {
+			if len(chapterIndices) > 0 {
+				t.TranslateChapters(p, chapterIndices, cb)
+			} else {
+				t.TranslateProject(p, cb)
+			}
 
 			mu.Lock()
 			translating = false
 			mu.Unlock()
-			translateBtn.SetText("Translate All")
-			translateBtn.Enable()
 
-			reloaded, err := appStore.Load(p.ID)
-			if err == nil {
-				showProjectDetail(reloaded)
-			}
+			fyne.Do(func() {
+				translateBtn.SetText("Translate All")
+				translateBtn.Enable()
+				reloaded, err := appStore.Load(p.ID)
+				if err == nil {
+					showProjectDetail(reloaded)
+				}
+			})
 		}()
 	}
 
-	// Export button only shown once some translation has been done
+	translateBtn.OnTapped = func() { runTranslation(nil) }
+
+	translateSelectedBtn := widget.NewButton("Translate Selected…", func() {
+		showChapterSelectDialog(p, runTranslation)
+	})
+
+	changeModelBtn := widget.NewButton("Change Model…", func() {
+		showChangeModelDialog(p)
+	})
+
+	rechunkBtn := widget.NewButton("Rechunk…", func() {
+		showRechunkDialog(p)
+	})
+
 	var actionRow fyne.CanvasObject
 	if completed > 0 {
 		exportBtn := widget.NewButton("Export…", func() {
 			showExportDialog(p)
 		})
-		actionRow = container.NewHBox(translateBtn, exportBtn)
+		actionRow = container.NewHBox(translateBtn, translateSelectedBtn, changeModelBtn, rechunkBtn, exportBtn)
 	} else {
-		actionRow = container.NewHBox(translateBtn)
+		actionRow = container.NewHBox(translateBtn, translateSelectedBtn, changeModelBtn, rechunkBtn)
 	}
 
 	chapterList := buildChapterList(p)
@@ -216,5 +231,196 @@ func showExportDialog(p *model.Project) {
 		_ = appStore.Save(p)
 
 		dialog.ShowInformation("Export Complete", fmt.Sprintf("Exported to:\n%s", output), mainWindow)
+	}, mainWindow)
+}
+
+func showChangeModelDialog(p *model.Project) {
+	providerSelect := widget.NewSelect(
+		[]string{"ollama", "dlgo-http", "dlgo"},
+		nil,
+	)
+	providerSelect.SetSelected(p.Provider)
+
+	providerURLEntry := widget.NewEntry()
+	providerURLEntry.SetText(p.ProviderURL)
+	providerURLEntry.SetPlaceHolder("e.g. http://localhost:11434")
+
+	modelEntry := widget.NewEntry()
+	modelEntry.SetText(p.ModelPath)
+	modelEntry.SetPlaceHolder("Model name or path")
+
+	// For Ollama: replace the text entry with a select populated from the server.
+	modelSelect := widget.NewSelect(nil, func(s string) {
+		modelEntry.SetText(s)
+	})
+
+	fetchBtn := widget.NewButton("Fetch Models", func() {
+		url := providerURLEntry.Text
+		if url == "" {
+			url = translator.DefaultOllamaURL
+		}
+		models, err := translator.ListOllamaModels(url)
+		if err != nil {
+			dialog.ShowError(err, mainWindow)
+			return
+		}
+		modelSelect.Options = models
+		modelSelect.Refresh()
+		if len(models) > 0 {
+			// Pre-select current model if present, else first
+			for _, m := range models {
+				if m == p.ModelPath {
+					modelSelect.SetSelected(m)
+					return
+				}
+			}
+			modelSelect.SetSelected(models[0])
+		}
+	})
+
+	// Trigger fetch immediately if provider is ollama
+	ollamaRow := container.NewBorder(nil, nil, nil, fetchBtn, modelSelect)
+
+	modelWidget := widget.NewLabel("") // placeholder, swapped below
+	_ = modelWidget
+
+	providerSelect.OnChanged = func(s string) {
+		// nothing extra needed; form items are fixed after creation
+	}
+
+	// Build form items — show ollama picker or plain entry depending on provider
+	var modelFormWidget fyne.CanvasObject
+	if p.Provider == model.ProviderOllama {
+		modelFormWidget = ollamaRow
+		// auto-fetch on open
+		go func() {
+			url := p.ProviderURL
+			if url == "" {
+				url = translator.DefaultOllamaURL
+			}
+			models, err := translator.ListOllamaModels(url)
+			if err != nil {
+				return
+			}
+			fyne.Do(func() {
+				modelSelect.Options = models
+				modelSelect.Refresh()
+				for _, m := range models {
+					if m == p.ModelPath {
+						modelSelect.SetSelected(m)
+						return
+					}
+				}
+				if len(models) > 0 {
+					modelSelect.SetSelected(models[0])
+				}
+			})
+		}()
+	} else {
+		modelFormWidget = modelEntry
+	}
+
+	items := []*widget.FormItem{
+		{Text: "Provider", Widget: providerSelect},
+		{Text: "Provider URL", Widget: providerURLEntry},
+		{Text: "Model", Widget: modelFormWidget},
+	}
+
+	dialog.ShowForm("Change Model", "Save", "Cancel", items, func(ok bool) {
+		if !ok {
+			return
+		}
+		p.Provider = providerSelect.Selected
+		p.ProviderURL = providerURLEntry.Text
+		// Use select value for ollama, entry for others
+		if p.Provider == model.ProviderOllama && modelSelect.Selected != "" {
+			p.ModelPath = modelSelect.Selected
+		} else {
+			p.ModelPath = modelEntry.Text
+		}
+		if err := appStore.Save(p); err != nil {
+			dialog.ShowError(err, mainWindow)
+			return
+		}
+		showProjectDetail(p)
+	}, mainWindow)
+}
+
+func showChapterSelectDialog(p *model.Project, onConfirm func([]int)) {
+	checks := make([]*widget.Check, len(p.Chapters))
+	items := make([]fyne.CanvasObject, len(p.Chapters))
+	for i, ch := range p.Chapters {
+		cc, ct := ch.Progress()
+		label := fmt.Sprintf("[%d] %s (%d/%d)", ch.Index, ch.Title, cc, ct)
+		c := widget.NewCheck(label, nil)
+		checks[i] = c
+		items[i] = c
+	}
+
+	content := container.NewVScroll(container.NewVBox(items...))
+	content.SetMinSize(fyne.NewSize(400, 300))
+
+	d := dialog.NewCustomConfirm("Select Chapters", "Translate", "Cancel", content, func(ok bool) {
+		if !ok {
+			return
+		}
+		var selected []int
+		for i, c := range checks {
+			if c.Checked {
+				selected = append(selected, i)
+			}
+		}
+		if len(selected) == 0 {
+			return
+		}
+		onConfirm(selected)
+	}, mainWindow)
+	d.Show()
+}
+
+func showRechunkDialog(p *model.Project) {
+	strategySelect := widget.NewSelect(
+		[]string{"paragraph", "sentences", "tokens"},
+		nil,
+	)
+	strategySelect.SetSelected(p.ChunkStrategy)
+
+	chunkSizeEntry := widget.NewEntry()
+	chunkSizeEntry.SetText(fmt.Sprintf("%d", p.ChunkMaxSize))
+
+	completed, _ := p.Progress()
+	warningLabel := widget.NewLabel("")
+	if completed > 0 {
+		warningLabel.SetText("Warning: completed translations will be preserved where source text matches, but unmatched chunks will reset to pending.")
+		warningLabel.Wrapping = fyne.TextWrapWord
+	}
+
+	items := []*widget.FormItem{
+		{Text: "Chunk Strategy", Widget: strategySelect},
+		{Text: "Max Chunk Size", Widget: chunkSizeEntry},
+	}
+	if completed > 0 {
+		items = append(items, &widget.FormItem{Text: "", Widget: warningLabel})
+	}
+
+	dialog.ShowForm("Rechunk Project", "Rechunk", "Cancel", items, func(ok bool) {
+		if !ok {
+			return
+		}
+		maxSize := 0
+		fmt.Sscanf(chunkSizeEntry.Text, "%d", &maxSize)
+
+		t := translator.New(appStore)
+		if err := t.Rechunk(p, strategySelect.Selected, maxSize); err != nil {
+			dialog.ShowError(err, mainWindow)
+			return
+		}
+
+		reloaded, err := appStore.Load(p.ID)
+		if err != nil {
+			dialog.ShowError(err, mainWindow)
+			return
+		}
+		showProjectDetail(reloaded)
 	}, mainWindow)
 }
