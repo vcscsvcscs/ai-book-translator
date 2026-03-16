@@ -52,18 +52,18 @@
   - [x] 6.8 Test single-pass flow with EnablePolishPass disabled
   - [x] 6.9 Verify polish prompt prevents summarization
 
-- [-] 7. Update translateChunk() Integration
+- [x] 7. Update translateChunk() Integration
   - [x] 7.1 Pass GenreContext to BuildUserMessage()
   - [x] 7.2 Apply sampling defaults before backend.ChatStream()
   - [x] 7.3 Use computeMaxOutputTokens() for dynamic token limits
   - [x] 7.4 Conditionally call polishTranslation() based on EnablePolishPass
-  - [-] 7.5 Ensure all existing functionality preserved
+  - [x] 7.5 Ensure all existing functionality preserved
 
-- [ ] 8. Extend LLMOptions Structure
-  - [ ] 8.1 Add Stop []string field to LLMOptions
-  - [ ] 8.2 Add Seed int field to LLMOptions
-  - [ ] 8.3 Update all LLMOptions construction sites
-  - [ ] 8.4 Test backward compatibility
+- [x] 8. Extend LLMOptions Structure
+  - [x] 8.1 Add Stop []string field to LLMOptions
+  - [x] 8.2 Add Seed int field to LLMOptions
+  - [x] 8.3 Update all LLMOptions construction sites
+  - [x] 8.4 Test backward compatibility
 
 - [ ] 9. Update LLM Backend Implementations
   - [ ] 9.1 Update Ollama backend to pass Stop and Seed

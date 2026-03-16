@@ -382,3 +382,143 @@ func TestPolishPromptPreventsSummarization(t *testing.T) {
 	// done by inspecting the prompts sent to the backend, but since we're using
 	// a simple mock, we verify the function executes correctly.
 }
+
+func TestLLMOptionsBackwardCompatibility(t *testing.T) {
+	t.Run("empty struct has zero values", func(t *testing.T) {
+		opts := LLMOptions{}
+		
+		// Verify all fields have zero values
+		if opts.MaxTokens != 0 {
+			t.Errorf("expected MaxTokens to be 0, got %d", opts.MaxTokens)
+		}
+		if opts.Temperature != 0 {
+			t.Errorf("expected Temperature to be 0, got %f", opts.Temperature)
+		}
+		if opts.TopK != 0 {
+			t.Errorf("expected TopK to be 0, got %d", opts.TopK)
+		}
+		if opts.TopP != 0 {
+			t.Errorf("expected TopP to be 0, got %f", opts.TopP)
+		}
+		if opts.MinP != 0 {
+			t.Errorf("expected MinP to be 0, got %f", opts.MinP)
+		}
+		if opts.PresencePenalty != 0 {
+			t.Errorf("expected PresencePenalty to be 0, got %f", opts.PresencePenalty)
+		}
+		if opts.RepetitionPenalty != 0 {
+			t.Errorf("expected RepetitionPenalty to be 0, got %f", opts.RepetitionPenalty)
+		}
+		if opts.ThinkingMode != "" {
+			t.Errorf("expected ThinkingMode to be empty, got %s", opts.ThinkingMode)
+		}
+		if opts.Stop != nil {
+			t.Errorf("expected Stop to be nil, got %v", opts.Stop)
+		}
+		if opts.Seed != 0 {
+			t.Errorf("expected Seed to be 0, got %d", opts.Seed)
+		}
+	})
+	
+	t.Run("new fields can be set independently", func(t *testing.T) {
+		opts := LLMOptions{
+			Stop: []string{"\n\nText:", "<|im_end|>"},
+			Seed: 42,
+		}
+		
+		// Verify new fields are set correctly
+		if len(opts.Stop) != 2 {
+			t.Errorf("expected Stop to have 2 elements, got %d", len(opts.Stop))
+		}
+		if opts.Stop[0] != "\n\nText:" {
+			t.Errorf("expected Stop[0] to be '\\n\\nText:', got %s", opts.Stop[0])
+		}
+		if opts.Stop[1] != "<|im_end|>" {
+			t.Errorf("expected Stop[1] to be '<|im_end|>', got %s", opts.Stop[1])
+		}
+		if opts.Seed != 42 {
+			t.Errorf("expected Seed to be 42, got %d", opts.Seed)
+		}
+		
+		// Verify other fields remain zero
+		if opts.MaxTokens != 0 {
+			t.Errorf("expected MaxTokens to be 0, got %d", opts.MaxTokens)
+		}
+		if opts.Temperature != 0 {
+			t.Errorf("expected Temperature to be 0, got %f", opts.Temperature)
+		}
+	})
+	
+	t.Run("all fields can be set together", func(t *testing.T) {
+		opts := LLMOptions{
+			MaxTokens:         2048,
+			Temperature:       0.2,
+			TopK:              40,
+			TopP:              0.9,
+			MinP:              0.05,
+			PresencePenalty:   0.0,
+			RepetitionPenalty: 1.1,
+			ThinkingMode:      "disabled",
+			Stop:              []string{"\n\nText:", "<|im_end|>"},
+			Seed:              42,
+		}
+		
+		// Verify all fields are set correctly
+		if opts.MaxTokens != 2048 {
+			t.Errorf("expected MaxTokens to be 2048, got %d", opts.MaxTokens)
+		}
+		if opts.Temperature != 0.2 {
+			t.Errorf("expected Temperature to be 0.2, got %f", opts.Temperature)
+		}
+		if opts.TopK != 40 {
+			t.Errorf("expected TopK to be 40, got %d", opts.TopK)
+		}
+		if opts.TopP != 0.9 {
+			t.Errorf("expected TopP to be 0.9, got %f", opts.TopP)
+		}
+		if opts.MinP != 0.05 {
+			t.Errorf("expected MinP to be 0.05, got %f", opts.MinP)
+		}
+		if opts.PresencePenalty != 0.0 {
+			t.Errorf("expected PresencePenalty to be 0.0, got %f", opts.PresencePenalty)
+		}
+		if opts.RepetitionPenalty != 1.1 {
+			t.Errorf("expected RepetitionPenalty to be 1.1, got %f", opts.RepetitionPenalty)
+		}
+		if opts.ThinkingMode != "disabled" {
+			t.Errorf("expected ThinkingMode to be 'disabled', got %s", opts.ThinkingMode)
+		}
+		if len(opts.Stop) != 2 {
+			t.Errorf("expected Stop to have 2 elements, got %d", len(opts.Stop))
+		}
+		if opts.Seed != 42 {
+			t.Errorf("expected Seed to be 42, got %d", opts.Seed)
+		}
+	})
+	
+	t.Run("partial initialization works correctly", func(t *testing.T) {
+		opts := LLMOptions{
+			Temperature: 0.5,
+			Stop:        []string{"STOP"},
+		}
+		
+		// Verify set fields
+		if opts.Temperature != 0.5 {
+			t.Errorf("expected Temperature to be 0.5, got %f", opts.Temperature)
+		}
+		if len(opts.Stop) != 1 || opts.Stop[0] != "STOP" {
+			t.Errorf("expected Stop to be ['STOP'], got %v", opts.Stop)
+		}
+		
+		// Verify unset fields remain zero
+		if opts.MaxTokens != 0 {
+			t.Errorf("expected MaxTokens to be 0, got %d", opts.MaxTokens)
+		}
+		if opts.Seed != 0 {
+			t.Errorf("expected Seed to be 0, got %d", opts.Seed)
+		}
+		if opts.TopK != 0 {
+			t.Errorf("expected TopK to be 0, got %d", opts.TopK)
+		}
+	})
+}
