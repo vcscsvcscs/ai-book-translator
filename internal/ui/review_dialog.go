@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 
@@ -60,25 +61,25 @@ func showReviewDialog(p *model.Project, chapterIdx, chunkIdx int) {
 	thinkLog.SetPlaceHolder("Thinking output will stream here during retranslation…")
 
 	thinkLogScroll := container.NewVScroll(thinkLog)
-
-	// Tabs: Translation | Thinking
-	tabs := container.NewAppTabs(
-		container.NewTabItem("Translation", container.NewBorder(nil, saveBtn, nil, nil,
-			container.NewVScroll(translatedEntry),
-		)),
-		container.NewTabItem("Thinking", thinkLogScroll),
-	)
-	tabs.SetTabLocation(container.TabLocationTop)
-
-	// Source scroll
+	translatedScroll := container.NewVScroll(translatedEntry)
 	sourceScroll := container.NewVScroll(sourceEntry)
 
-	// Main content split: source left, translation+thinking right
+	// local accumulators so we don't read .Text on disabled widgets
+	var thinkBuf, transBuf string
+
+	// Three-panel split: source | translation | thinking
+	sourcePanel := container.NewBorder(widget.NewLabel("Source"), nil, nil, nil, sourceScroll)
+	translationPanel := container.NewBorder(widget.NewLabel("Translation"), saveBtn, nil, nil, translatedScroll)
+	thinkingPanel := container.NewBorder(widget.NewLabel("Thinking"), nil, nil, nil, thinkLogScroll)
+
 	contentSplit := container.NewHSplit(
-		container.NewBorder(widget.NewLabel("Source:"), nil, nil, nil, sourceScroll),
-		container.NewBorder(nil, nil, nil, nil, tabs),
+		sourcePanel,
+		container.NewHSplit(translationPanel, thinkingPanel),
 	)
-	contentSplit.SetOffset(0.45)
+	contentSplit.SetOffset(0.33)
+
+	// ── Cancellation ─────────────────────────────────────────────────────
+	var cancelFn context.CancelFunc
 
 	// ── Retranslate controls ──────────────────────────────────────────────
 	providerSelect := widget.NewSelect(
@@ -141,7 +142,6 @@ func showReviewDialog(p *model.Project, chapterIdx, chunkIdx int) {
 	repetitionPenaltyEntry := widget.NewEntry()
 	repetitionPenaltyEntry.SetText(fmt.Sprintf("%.2f", p.ModelParams.RepetitionPenalty))
 
-	// Qwen3 preset loader
 	presetSelect := widget.NewSelect([]string{
 		"— Qwen3 Non-Thinking (general)",
 		"— Qwen3 Thinking (general)",
@@ -166,6 +166,13 @@ func showReviewDialog(p *model.Project, chapterIdx, chunkIdx int) {
 	presetSelect.PlaceHolder = "Load preset…"
 
 	statusLabel := widget.NewLabel("")
+
+	stopBtn := widget.NewButton("Stop", func() {
+		if cancelFn != nil {
+			cancelFn()
+		}
+	})
+	stopBtn.Disable()
 
 	retranslateBtn := widget.NewButton("Retranslate", func() {
 		params := p.ModelParams
@@ -197,13 +204,20 @@ func showReviewDialog(p *model.Project, chapterIdx, chunkIdx int) {
 			modelPath = ollamaModelSelect.Selected
 		}
 
+		ctx, cancel := context.WithCancel(context.Background())
+		cancelFn = cancel
+
 		tr := translator.New(appStore)
 		statusLabel.SetText("Translating…")
+		thinkBuf = ""
+		transBuf = ""
 		translatedEntry.SetText("")
 		thinkLog.SetText("")
+		stopBtn.Enable()
 
 		go func() {
 			err := tr.RetranslateChunk(
+				ctx,
 				p, chapterIdx, chunkIdx,
 				providerSelect.Selected,
 				providerURLEntry.Text,
@@ -213,26 +227,32 @@ func showReviewDialog(p *model.Project, chapterIdx, chunkIdx int) {
 					fyne.Do(func() {
 						if e.EventType == translator.EventToken {
 							if e.IsThinking {
-								// Switch to thinking tab and stream there
-								tabs.SelectIndex(1)
-								thinkLog.SetText(thinkLog.Text + e.Token)
+								thinkBuf += e.Token
+								thinkLog.SetText(thinkBuf)
 								thinkLogScroll.ScrollToBottom()
 							} else {
-								// Switch back to translation tab when real tokens start
-								tabs.SelectIndex(0)
-								translatedEntry.SetText(translatedEntry.Text + e.Token)
+								transBuf += e.Token
+								translatedEntry.SetText(transBuf)
+								translatedScroll.ScrollToBottom()
 							}
 						}
 						if e.EventType == translator.EventChunkDone || e.EventType == translator.EventChunkFailed {
 							statusLabel.SetText("")
+							stopBtn.Disable()
 						}
 					})
 				},
 			)
 			fyne.Do(func() {
-				if err != nil {
+				stopBtn.Disable()
+				cancel()
+				if err != nil && ctx.Err() == nil {
 					dialog.ShowError(err, mainWindow)
 					statusLabel.SetText("")
+					return
+				}
+				if ctx.Err() != nil {
+					statusLabel.SetText("Stopped.")
 					return
 				}
 				reloaded, loadErr := appStore.Load(p.ID)
@@ -243,7 +263,6 @@ func showReviewDialog(p *model.Project, chapterIdx, chunkIdx int) {
 		}()
 	})
 
-	// Collapsible retranslate options
 	optionsForm := &widget.Form{Items: []*widget.FormItem{
 		{Text: "Preset", Widget: presetSelect},
 		{Text: "Provider", Widget: providerSelect},
@@ -267,7 +286,7 @@ func showReviewDialog(p *model.Project, chapterIdx, chunkIdx int) {
 	footer := container.NewVBox(
 		widget.NewSeparator(),
 		optionsAccordion,
-		container.NewHBox(retranslateBtn, statusLabel),
+		container.NewHBox(retranslateBtn, stopBtn, statusLabel),
 	)
 
 	header := container.NewVBox(

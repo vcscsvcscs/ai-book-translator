@@ -3,6 +3,7 @@ package translator
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -28,6 +29,7 @@ type chatRequest struct {
 	Model    string        `json:"model"`
 	Messages []chatMessage `json:"messages"`
 	Stream   bool          `json:"stream"`
+	Stop     []string      `json:"stop,omitempty"`
 	// Top-level OpenAI-compatible fields
 	Temperature       float32  `json:"temperature,omitempty"`
 	MaxTokens         int      `json:"max_tokens,omitempty"`
@@ -45,8 +47,9 @@ type chatMessage struct {
 
 // chatOptions carries Ollama-specific sampling params that aren't in the OpenAI spec.
 type chatOptions struct {
-	TopK float32 `json:"top_k,omitempty"`
-	MinP float32 `json:"min_p,omitempty"`
+	TopK     float32 `json:"top_k,omitempty"`
+	MinP     float32 `json:"min_p,omitempty"`
+	Thinking *bool   `json:"thinking,omitempty"` // Ollama >= 0.9 Qwen3 thinking toggle
 }
 
 type streamChunk struct {
@@ -61,25 +64,31 @@ type streamDelta struct {
 	Content string `json:"content"`
 }
 
-func (h *httpBackend) ChatStream(system, user string, onToken func(string), opts LLMOptions) error {
+func (h *httpBackend) ChatStream(ctx context.Context, system, user string, onToken func(string), opts LLMOptions) error {
 	var messages []chatMessage
 	if system != "" {
 		messages = append(messages, chatMessage{Role: "system", Content: system})
 	}
 	messages = append(messages, chatMessage{Role: "user", Content: user})
 
+	// Use native Ollama thinking toggle instead of /think directive in the prompt.
+	thinkingOn := opts.ThinkingMode == "enabled" || opts.ThinkingMode == "budget"
+	thinkingFlag := &thinkingOn
+
 	reqBody := chatRequest{
 		Model:             h.model,
 		Messages:          messages,
 		Stream:            true,
+		Stop:              []string{"<|endoftext|>", "<|im_end|>"},
 		Temperature:       opts.Temperature,
 		MaxTokens:         opts.MaxTokens,
 		TopP:              opts.TopP,
 		PresencePenalty:   opts.PresencePenalty,
 		RepetitionPenalty: opts.RepetitionPenalty,
 		Options: &chatOptions{
-			TopK: float32(opts.TopK),
-			MinP: opts.MinP,
+			TopK:     float32(opts.TopK),
+			MinP:     opts.MinP,
+			Thinking: thinkingFlag,
 		},
 	}
 
@@ -88,7 +97,7 @@ func (h *httpBackend) ChatStream(system, user string, onToken func(string), opts
 		return fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", h.baseURL+"/v1/chat/completions", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", h.baseURL+"/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}

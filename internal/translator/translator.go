@@ -1,6 +1,7 @@
 package translator
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -71,7 +72,7 @@ func (t *Translator) TranslateProject(p *model.Project, onProgress ProgressCallb
 				continue
 			}
 
-			err := t.translateChunk(p, ci, ki, p.Provider, p.ProviderURL, p.ModelPath, p.ModelParams, onProgress, completed, total)
+			err := t.translateChunk(context.Background(), p, ci, ki, p.Provider, p.ProviderURL, p.ModelPath, p.ModelParams, onProgress, completed, total)
 			if err == nil {
 				completed++
 			}
@@ -143,7 +144,7 @@ func (t *Translator) TranslateChapters(p *model.Project, chapterIndices []int, o
 			if chunk.Status == model.ChunkCompleted || chunk.Status == model.ChunkRevised {
 				continue
 			}
-			err := t.translateChunk(p, ci, ki, p.Provider, p.ProviderURL, p.ModelPath, p.ModelParams, onProgress, completed, total)
+			err := t.translateChunk(context.Background(), p, ci, ki, p.Provider, p.ProviderURL, p.ModelPath, p.ModelParams, onProgress, completed, total)
 			if err == nil {
 				completed++
 			}
@@ -187,7 +188,7 @@ func (t *Translator) TranslateChapter(p *model.Project, chapterIdx int, onProgre
 		if chunk.Status == model.ChunkCompleted || chunk.Status == model.ChunkRevised {
 			continue
 		}
-		err := t.translateChunk(p, chapterIdx, ki, p.Provider, p.ProviderURL, p.ModelPath, p.ModelParams, onProgress, completed, total)
+		err := t.translateChunk(context.Background(), p, chapterIdx, ki, p.Provider, p.ProviderURL, p.ModelPath, p.ModelParams, onProgress, completed, total)
 		if err == nil {
 			completed++
 		}
@@ -206,12 +207,13 @@ func (t *Translator) TranslateSingleChunk(p *model.Project, chapterIdx, chunkIdx
 	}
 
 	completed, total := p.Progress()
-	return t.translateChunk(p, chapterIdx, chunkIdx, p.Provider, p.ProviderURL, p.ModelPath, p.ModelParams, onProgress, completed, total)
+	return t.translateChunk(context.Background(), p, chapterIdx, chunkIdx, p.Provider, p.ProviderURL, p.ModelPath, p.ModelParams, onProgress, completed, total)
 }
 
 // RetranslateChunk retranslates a specific chunk, optionally overriding model and params.
 // Pass empty strings for provider/providerURL/modelPath to inherit from the project.
 func (t *Translator) RetranslateChunk(
+	ctx context.Context,
 	p *model.Project,
 	chapterIdx, chunkIdx int,
 	provider, providerURL, modelPath string,
@@ -241,10 +243,11 @@ func (t *Translator) RetranslateChunk(
 	ch.Chunks[chunkIdx].ErrorMessage = ""
 
 	completed, total := p.Progress()
-	return t.translateChunk(p, chapterIdx, chunkIdx, provider, providerURL, modelPath, params, onProgress, completed, total)
+	return t.translateChunk(ctx, p, chapterIdx, chunkIdx, provider, providerURL, modelPath, params, onProgress, completed, total)
 }
 
 func (t *Translator) translateChunk(
+	ctx context.Context,
 	p *model.Project,
 	chapterIdx, chunkIdx int,
 	provider, providerURL, modelPath string,
@@ -284,7 +287,7 @@ func (t *Translator) translateChunk(
 		return err
 	}
 
-	systemPrompt := BuildSystemPrompt(p.SourceLang, p.TargetLang, p.StylePrompt, params)
+	systemPrompt := BuildSystemPrompt(p.SourceLang, p.TargetLang, p.StylePrompt)
 
 	var result strings.Builder
 	tokenCount := 0
@@ -299,18 +302,36 @@ func (t *Translator) translateChunk(
 		MinP:              params.MinP,
 		PresencePenalty:   params.PresencePenalty,
 		RepetitionPenalty: params.RepetitionPenalty,
+		ThinkingMode:      params.ThinkingMode,
 	}
 
 	userMsg := BuildUserMessage(p.SourceLang, p.TargetLang, chunk.SourceText)
-	err = backend.ChatStream(systemPrompt, userMsg, func(token string) {
+	err = backend.ChatStream(ctx, systemPrompt, userMsg, func(token string) {
 		result.WriteString(token)
 		tokenCount++
 
-		// Track whether we're inside a <think> block so the UI can route it.
+		// Recompute think state from the full buffer each token.
+		// This is simple and correct regardless of how the model tokenises the tags.
 		combined := result.String()
 		openIdx := strings.LastIndex(combined, "<think>")
 		closeIdx := strings.LastIndex(combined, "</think>")
+		wasThinking := inThink
 		inThink = openIdx != -1 && (closeIdx == -1 || closeIdx < openIdx)
+
+		// Skip emitting the tag tokens themselves so they don't pollute either panel.
+		trimmed := strings.TrimRight(token, " \t")
+		if trimmed == "<think>" || trimmed == "</think>" {
+			return
+		}
+
+		// If we just crossed out of a think block, don't emit the closing tag fragment.
+		if wasThinking && !inThink {
+			// strip any trailing </think> from the token before emitting
+			token = strings.TrimSuffix(token, "</think>")
+			if token == "" {
+				return
+			}
+		}
 
 		if onProgress != nil {
 			elapsed := time.Since(startTime).Seconds()

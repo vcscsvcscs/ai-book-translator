@@ -3,6 +3,7 @@
 package translator
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/computerex/dlgo"
@@ -20,7 +21,7 @@ func NewDlgoBackend(modelPath string) (LLMBackend, error) {
 	return &dlgoBackend{model: m}, nil
 }
 
-func (d *dlgoBackend) ChatStream(system, user string, onToken func(string), opts LLMOptions) error {
+func (d *dlgoBackend) ChatStream(_ context.Context, system, user string, onToken func(string), opts LLMOptions) error {
 	dlgoOpts := []dlgo.Option{
 		dlgo.WithMaxTokens(opts.MaxTokens),
 		dlgo.WithTemperature(opts.Temperature),

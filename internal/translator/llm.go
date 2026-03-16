@@ -1,7 +1,9 @@
 package translator
 
+import "context"
+
 type LLMBackend interface {
-	ChatStream(system, user string, onToken func(string), opts LLMOptions) error
+	ChatStream(ctx context.Context, system, user string, onToken func(string), opts LLMOptions) error
 	Close()
 }
 
@@ -13,4 +15,5 @@ type LLMOptions struct {
 	MinP              float32
 	PresencePenalty   float32
 	RepetitionPenalty float32
+	ThinkingMode      string // model.ThinkingDisabled / Enabled / Budget
 }

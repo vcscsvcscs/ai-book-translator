@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -76,7 +77,7 @@ var reviewCmd = &cobra.Command{
 					return p.ModelPath
 				}(), p.Provider)
 			cb := cliProgressCallback()
-			if err := t.RetranslateChunk(p, chapterIdx, chunkIdx, "", "", modelPath, params, cb); err != nil {
+			if err := t.RetranslateChunk(context.Background(), p, chapterIdx, chunkIdx, "", "", modelPath, params, cb); err != nil {
 				return err
 			}
 
